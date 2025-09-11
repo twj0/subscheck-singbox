@@ -2,7 +2,8 @@
 # SubCheck Project - Final Installation Script for Ubuntu 24.04
 # - Auto-detects root user to handle sudo correctly.
 # - Uses a GitHub accelerator for both Xray and uv downloads.
-# - Fixes environment paths and uses --local install for Xray in container environments.
+# - Installs uv manually to avoid installer script conflicts.
+# - Uses --local install for Xray in container environments.
 
 set -e
 
@@ -18,16 +19,25 @@ echo "--- [2/5] Installing essential tools (git, curl, unzip) ---"
 $SUDO_CMD apt install -y git curl unzip
 
 echo "--- [3/5] Installing uv (a fast Python package installer) ---"
-# --- [FIX 4] Accelerate uv download for mainland China environments ---
-# The official installer allows overriding the download URL via an environment variable.
-UV_VERSION=$(curl -s https://api.github.com/repos/astral-sh/uv/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-UV_ARCH="aarch64-unknown-linux-gnu" # Change if your VPS is x86_64
-UV_BASE_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_ARCH}.tar.gz"
-export UV_DOWNLOAD_URL="https://ghfast.top/${UV_BASE_URL}"
+# --- [FIX 5] Manually install uv to bypass problematic installer script ---
+# We determine the latest version and architecture, then download and place it manually.
+UV_LATEST_INFO=$(curl -s https://api.github.com/repos/astral-sh/uv/releases/latest)
+UV_VERSION=$(echo "$UV_LATEST_INFO" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+UV_ARCH="aarch64-unknown-linux-gnu" # Change to x86_64-unknown-linux-gnu if your VPS is Intel/AMD
 
-echo "Using accelerated download URL for uv: $UV_DOWNLOAD_URL"
-curl -LsSf https://astral.sh/uv/install.sh | sh
-unset UV_DOWNLOAD_URL
+# Construct the full, correct download URL
+ACCELERATED_URL="https://ghfast.top/https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_ARCH}.tar.gz"
+echo "Manually downloading uv from: $ACCELERATED_URL"
+
+# Download, extract, and install
+curl -L "$ACCELERATED_URL" -o uv.tar.gz
+tar -xzf uv.tar.gz
+# Ensure the destination directory exists
+mkdir -p "$HOME/.local/bin"
+# Move the binary to a directory in the PATH
+mv "${UV_ARCH}/uv" "$HOME/.local/bin/"
+# Clean up
+rm -rf uv.tar.gz "${UV_ARCH}"
 
 echo "Activating uv environment..."
 source "$HOME/.local/bin/env"
