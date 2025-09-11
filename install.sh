@@ -2,7 +2,7 @@
 # SubCheck Project - Final Installation Script for Ubuntu 24.04
 # - Auto-detects root user to handle sudo correctly.
 # - Uses a GitHub accelerator for both Xray and uv downloads.
-# - Installs uv manually to avoid installer script conflicts.
+# - Installs uv manually in a temporary directory to handle flat archive structure.
 # - Uses --local install for Xray in container environments.
 
 set -e
@@ -19,25 +19,26 @@ echo "--- [2/5] Installing essential tools (git, curl, unzip) ---"
 $SUDO_CMD apt install -y git curl unzip
 
 echo "--- [3/5] Installing uv (a fast Python package installer) ---"
-# --- [FIX 5] Manually install uv to bypass problematic installer script ---
-# We determine the latest version and architecture, then download and place it manually.
+# --- [FIX 6] Handle flat tarball structure by extracting in a temp directory ---
 UV_LATEST_INFO=$(curl -s https://api.github.com/repos/astral-sh/uv/releases/latest)
 UV_VERSION=$(echo "$UV_LATEST_INFO" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 UV_ARCH="aarch64-unknown-linux-gnu" # Change to x86_64-unknown-linux-gnu if your VPS is Intel/AMD
 
-# Construct the full, correct download URL
 ACCELERATED_URL="https://ghfast.top/https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_ARCH}.tar.gz"
 echo "Manually downloading uv from: $ACCELERATED_URL"
 
-# Download, extract, and install
-curl -L "$ACCELERATED_URL" -o uv.tar.gz
-tar -xzf uv.tar.gz
-# Ensure the destination directory exists
+# Create a temporary directory for clean extraction
+mkdir -p /tmp/uv_install
+curl -L "$ACCELERATED_URL" -o /tmp/uv_install/uv.tar.gz
+# Extract the contents inside the temporary directory
+tar -xzf /tmp/uv_install/uv.tar.gz -C /tmp/uv_install/
+
+# Ensure the final destination directory exists
 mkdir -p "$HOME/.local/bin"
-# Move the binary to a directory in the PATH
-mv "${UV_ARCH}/uv" "$HOME/.local/bin/"
-# Clean up
-rm -rf uv.tar.gz "${UV_ARCH}"
+# Move the uv executable from the temp dir to its final location
+mv /tmp/uv_install/uv "$HOME/.local/bin/"
+# Clean up the temporary directory
+rm -rf /tmp/uv_install
 
 echo "Activating uv environment..."
 source "$HOME/.local/bin/env"
