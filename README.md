@@ -3,7 +3,7 @@
 SubCheck 是一个专为中国大陆用户设计的高性能代理节点测试和筛选工具。它能够自动从多个订阅源获取节点，通过真实的HTTP延迟和下载速度测试，为您筛选出当前网络环境下最优质、最快速的代理节点。
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue?logo=python)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 
 ---
 
@@ -107,7 +107,8 @@ crontab -e
 ```
 # SubCheck Project - Automatic Node Testing
 0 */6 * * * /path/to/your/project/run.sh
-```> **重要**: 请务必将 `/path/to/your/project/run.sh` 替换为您服务器上 `run.sh` 脚本的 **绝对路径**。
+```
+
 
 ### 3. 查看日志
 
