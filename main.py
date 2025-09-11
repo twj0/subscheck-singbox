@@ -18,12 +18,29 @@ console = Console()
 
 async def fetch_subscription_content(url: str, session: aiohttp.ClientSession) -> str:
     """Fetches content from a single subscription URL."""
-    try:
-        async with session.get(url, timeout=15) as response:
-            return await response.text()
-    except Exception as e:
-        log.error(f"Failed to fetch {url}: {e}")
-        return ""
+    max_retries = 2
+    retry_delay = 1.0
+    
+    for attempt in range(max_retries + 1):
+        try:
+            timeout = aiohttp.ClientTimeout(total=15, connect=10)
+            async with session.get(url, timeout=timeout) as response:
+                if response.status == 200:
+                    content = await response.text()
+                    return content
+                else:
+                    log.warning(f"订阅源返回错误状态 {response.status}: {url}")
+                    
+        except asyncio.TimeoutError:
+            log.warning(f"订阅源访问超时 (第{attempt+1}次尝试): {url}")
+        except Exception as e:
+            log.warning(f"订阅源访问失败 (第{attempt+1}次尝试): {url} - {e}")
+        
+        if attempt < max_retries:
+            await asyncio.sleep(retry_delay)
+            retry_delay *= 1.5  # 递增延迟
+    
+    return ""
 
 def parse_content(content: str) -> List[Dict]:
     """Intelligently parses content, trying YAML then Base64/Plaintext."""
@@ -113,41 +130,103 @@ async def main():
         log.error(f"Subscription file not found: {sub_file}")
         return
 
-    urls = [line.strip() for line in sub_file.read_text(encoding='utf-8').splitlines() if line.strip() and not line.startswith('#')]
+    urls = [line.strip() for line in sub_file.read_text(encoding='utf-8').splitlines() 
+            if line.strip() and not line.startswith('#')]
     log.info(f"Found {len(urls)} subscription links.")
-
-    async with aiohttp.ClientSession(headers={'User-Agent': 'SubCheck/1.0'}) as session:
-        tasks = [fetch_subscription_content(url, session) for url in urls]
-        contents = await asyncio.gather(*tasks)
-
-    all_nodes = []
-    for content in contents:
-        if content:
-            all_nodes.extend(parse_content(content))
     
-    unique_nodes = deduplicate_nodes(all_nodes)
-    log.info(f"Total nodes: {len(all_nodes)}, Unique nodes: {len(unique_nodes)}")
+    if not urls:
+        log.error("No valid subscription URLs found.")
+        return
+
+    # 使用连接池优化网络请求
+    connector = aiohttp.TCPConnector(
+        limit=20,
+        limit_per_host=5,
+        keepalive_timeout=30,
+        enable_cleanup_closed=True
+    )
     
-    nodes_to_test = unique_nodes
-    max_nodes = config['general_settings']['max_nodes_to_test']
-    if max_nodes != -1 and len(unique_nodes) > max_nodes:
-        # Sort nodes by name before slicing to ensure consistency
-        unique_nodes.sort(key=lambda n: n.get('name', ''))
-        nodes_to_test = unique_nodes[:max_nodes]
-        log.info(f"Testing the first {max_nodes} nodes.")
+    tester = None
+    try:
+        async with aiohttp.ClientSession(
+            headers={'User-Agent': 'SubCheck/1.0'}, 
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as session:
+            # 串行获取订阅内容以避免过多并发连接
+            contents = []
+            for url in urls:
+                content = await fetch_subscription_content(url, session)
+                if content:
+                    contents.append(content)
+                await asyncio.sleep(0.1)  # 限制请求频率
 
-    tester = NodeTester(config)
-    concurrency = config['general_settings']['concurrency']
-    semaphore = asyncio.Semaphore(concurrency)
-    
-    async def test_with_semaphore(node, index):
-        async with semaphore:
-            return await tester.test_single_node(node, index)
+        all_nodes = []
+        valid_contents = [content for content in contents if content.strip()]
+        log.info(f"Successfully fetched {len(valid_contents)} subscription contents.")
+        
+        for content in valid_contents:
+            if content:
+                nodes = parse_content(content)
+                if nodes:
+                    all_nodes.extend(nodes)
+        
+        unique_nodes = deduplicate_nodes(all_nodes)
+        log.info(f"Total nodes: {len(all_nodes)}, Unique nodes: {len(unique_nodes)}")
+        
+        if not unique_nodes:
+            log.error("No valid nodes found from all subscriptions.")
+            return
+        
+        nodes_to_test = unique_nodes
+        max_nodes = config['general_settings']['max_nodes_to_test']
+        if max_nodes != -1 and len(unique_nodes) > max_nodes:
+            # Sort nodes by name before slicing to ensure consistency
+            unique_nodes.sort(key=lambda n: n.get('name', ''))
+            nodes_to_test = unique_nodes[:max_nodes]
+            log.info(f"Testing the first {max_nodes} nodes.")
 
-    test_tasks = [test_with_semaphore(node, i) for i, node in enumerate(nodes_to_test)]
-    results = await asyncio.gather(*test_tasks)
+        tester = NodeTester(config)
+        concurrency = min(config['general_settings']['concurrency'], len(nodes_to_test), 10)  # 限制并发数
+        semaphore = asyncio.Semaphore(concurrency)
+        
+        async def test_with_semaphore(node, index):
+            async with semaphore:
+                return await tester.test_single_node(node, index)
 
-    save_and_display_results(results, config)
+        log.info(f"Starting tests with concurrency: {concurrency}")
+        test_tasks = [test_with_semaphore(node, i) for i, node in enumerate(nodes_to_test)]
+        results = await asyncio.gather(*test_tasks, return_exceptions=True)
+        
+        # 处理异常结果
+        processed_results = []
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                log.error(f"Node {i+1} test failed with exception: {result}")
+                processed_results.append({
+                    'name': nodes_to_test[i].get('name', 'Unknown'),
+                    'status': 'failed',
+                    'error': str(result)
+                })
+            else:
+                processed_results.append(result)
+        
+        save_and_display_results(processed_results, config)
+        
+    except Exception as e:
+        log.error(f"Main execution failed: {e}")
+    finally:
+        # 确保清理资源
+        if tester:
+            try:
+                await tester.cleanup()
+            except Exception as e:
+                log.warning(f"Cleanup failed: {e}")
+        
+        try:
+            await connector.close()
+        except:
+            pass
 
 if __name__ == "__main__":
     try:

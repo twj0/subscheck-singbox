@@ -1,4 +1,4 @@
-# SubCheck Project Configuration
+# SubCheck Sing-box Configuration
 
 general_settings:
   max_nodes_to_test: 100 # -1 to test all nodes
@@ -7,18 +7,12 @@ general_settings:
 test_settings:
   timeout: 10              # Timeout in seconds for latency tests
   speed_test_duration: 8   # Duration in seconds for speed tests
-
-# URLs for testing latency and speed.
-# It's crucial to have both international and mainland China endpoints.
-test_urls:
-  latency:
+  latency_urls:            # URLs for latency testing
     - http://cp.cloudflare.com/generate_204  # Cloudflare (International)
     - https://www.google.com/generate_204    # Google (International)
     - https://connect.rom.miui.com/generate_204 # Xiaomi (Mainland China)
     - http://www.baidu.com/generate_204       # Baidu (Mainland China)
-  
-  speed:
-    # A good mix of international and domestic large file providers
+  speed_urls:              # URLs for speed testing
     - http://cachefly.cachefly.net/10mb.test   # Cachefly (International)
     - https://speed.cloudflare.com/__down?bytes=10000000 # Cloudflare Speed Test
     - https://speedtest.sh.chinamobile.com/speedtest/5g/10m # China Mobile Shanghai

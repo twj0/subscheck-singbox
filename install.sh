@@ -43,30 +43,29 @@ else
     echo -e "${GREEN}✅ 'uv' installed successfully.${NC}"
 fi
 
-echo -e "${GREEN}--- [4/7] Installing Xray-core ---${NC}"
-if command -v xray &> /dev/null; then
-    echo -e "${YELLOW}'xray' is already installed. Skipping. Current version: $(xray version | head -n 1)${NC}"
+echo -e "${GREEN}--- [4/7] Installing Sing-box ---${NC}"
+if command -v sing-box &> /dev/null; then
+    echo -e "${YELLOW}'sing-box' is already installed. Skipping. Current version: $(sing-box version | head -n 1)${NC}"
 else
-    # ... [Xray installation logic remains the same] ...
-    ARCH=$(uname -m); case "$ARCH" in x86_64) ZIP_FILENAME="Xray-linux-64.zip" ;; aarch64|arm64) ZIP_FILENAME="Xray-linux-arm64-v8a.zip" ;; *) echo -e "${RED}ERR: Unsupported arch: $ARCH.${NC}"; exit 1 ;; esac
-    echo "Arch: $ARCH, File: $ZIP_FILENAME"
-    XRAY_LATEST_TAG=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r '.tag_name')
-    if [ -z "$XRAY_LATEST_TAG" ] || [ "$XRAY_LATEST_TAG" = "null" ]; then echo -e "${RED}ERR: Could not fetch Xray tag.${NC}"; exit 1; fi
-    echo "Latest Xray version is $XRAY_LATEST_TAG"
+    ARCH=$(uname -m); case "$ARCH" in x86_64) SINGBOX_ARCH="amd64" ;; aarch64|arm64) SINGBOX_ARCH="arm64" ;; *) echo -e "${RED}ERR: Unsupported arch: $ARCH.${NC}"; exit 1 ;; esac
+    echo "Arch: $ARCH, Sing-box arch: $SINGBOX_ARCH"
+    SINGBOX_LATEST_TAG=$(curl -s https://api.github.com/repos/SagerNet/sing-box/releases/latest | jq -r '.tag_name')
+    if [ -z "$SINGBOX_LATEST_TAG" ] || [ "$SINGBOX_LATEST_TAG" = "null" ]; then echo -e "${RED}ERR: Could not fetch Sing-box tag.${NC}"; exit 1; fi
+    echo "Latest Sing-box version is $SINGBOX_LATEST_TAG"
+    SINGBOX_FILENAME="sing-box-${SINGBOX_LATEST_TAG#v}-linux-${SINGBOX_ARCH}.tar.gz"
     ACCELERATORS=("https://ghfast.top" "https://ghproxy.com" "https://github.com"); DOWNLOAD_SUCCESS=false
     for acc in "${ACCELERATORS[@]}"; do
-        DOWNLOAD_URL="${acc}/https://github.com/XTLS/Xray-core/releases/download/${XRAY_LATEST_TAG}/${ZIP_FILENAME}"
+        DOWNLOAD_URL="${acc}/https://github.com/SagerNet/sing-box/releases/download/${SINGBOX_LATEST_TAG}/${SINGBOX_FILENAME}"
         echo -e "Trying: ${YELLOW}${DOWNLOAD_URL}${NC}"
-        TMP_DIR="/tmp/xray_$$"; mkdir -p "$TMP_DIR"
-        if curl -L --fail -o "$TMP_DIR/$ZIP_FILENAME" "$DOWNLOAD_URL"; then
+        TMP_DIR="/tmp/singbox_$$"; mkdir -p "$TMP_DIR"
+        if curl -L --fail -o "$TMP_DIR/$SINGBOX_FILENAME" "$DOWNLOAD_URL"; then
             echo -e "${GREEN}Download successful!${NC}"; DOWNLOAD_SUCCESS=true; break
         else echo -e "${YELLOW}Download failed. Trying next...${NC}"; rm -rf "$TMP_DIR"; fi
     done
-    if [ "$DOWNLOAD_SUCCESS" = false ]; then echo -e "${RED}ERR: Failed to download Xray.${NC}"; exit 1; fi
-    unzip -o "$TMP_DIR/$ZIP_FILENAME" -d "$TMP_DIR"
-    $SUDO_CMD mv "$TMP_DIR/xray" /usr/local/bin/; $SUDO_CMD mkdir -p /usr/local/share/xray/
-    $SUDO_CMD mv "$TMP_DIR"/geo*.dat /usr/local/share/xray/
-    rm -rf "$TMP_DIR"; echo -e "${GREEN}✅ Xray-core installed successfully.${NC}"
+    if [ "$DOWNLOAD_SUCCESS" = false ]; then echo -e "${RED}ERR: Failed to download Sing-box.${NC}"; exit 1; fi
+    tar -xzf "$TMP_DIR/$SINGBOX_FILENAME" -C "$TMP_DIR"
+    $SUDO_CMD mv "$TMP_DIR"/sing-box-*/sing-box /usr/local/bin/
+    rm -rf "$TMP_DIR"; echo -e "${GREEN}✅ Sing-box installed successfully.${NC}"
 fi
 
 echo -e "${GREEN}--- [5/7] Setting up Python virtual environment (.venv) ---${NC}"

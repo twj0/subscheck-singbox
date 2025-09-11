@@ -44,3 +44,11 @@ tmpl/SubsCheck-Win-GUI/Properties/Settings.settings
 subcheck_simple.py
 
 prompt/
+debug/app_20250911_210122.log
+debug/app_20250911_210402.log
+debug/app_20250911_210433.log
+debug/app_20250911_210452.log
+debug/app_20250911_212118.log
+sing-box-1.12.5-windows-amd64/sing-box-1.12.5-windows-amd64/LICENSE
+sing-box-1.12.5-windows-amd64/sing-box-1.12.5-windows-amd64/sing-box.exe
+uv.lock

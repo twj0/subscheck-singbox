@@ -17,7 +17,7 @@ SubCheck 是一个专为中国大陆用户设计的高性能代理节点测试�
 - **高度可配置**: 所有关键参数，如并发数、超时时间、测试URL、筛选节点数量等，均可通过 `config.yaml` 文件进行灵活配置。
 - **自动化运行**: 配备 `install.sh` 和 `run.sh` 脚本，可轻松在 Ubuntu 服务器上部署，并通过 `cron` 实现定时自动测试和更新结果。
 - **清晰的结果展示**: 使用 `rich` 库在命令行生成美观的结果表格，直观展示最优节点的性能数据。
-- **健壮的架构**: 依赖 `Xray-core` 作为测试核心，确保了对各种复杂代理协议的稳定支持。
+- **健壮的架构**: 依赖 `Sing-box` 作为测试核心，确保了对各种复杂代理协议的稳定支持。
 
 ---
 
@@ -34,7 +34,7 @@ cd subscheck-ubuntu
 
 ### 2. 执行安装脚本
 
-项目提供了一键安装脚本 `install.sh`，它将自动完成所有环境依赖的安装，包括 `git`, `curl`, `uv` (高速Python包安装器) 以及 `Xray-core`。
+项目提供了一键安装脚本 `install.sh`，它将自动完成所有环境依赖的安装，包括 `git`, `curl`, `uv` (高速Python包安装器) 以及 `Sing-box`。
 
 ```bash
 bash install.sh
@@ -126,8 +126,13 @@ crontab -e
 ├── install.sh              # 一键安装脚本
 ├── run.sh                  # 自动化执行脚本
 ├── requirements.txt        # Python 依赖
-├── core/                   # 与 Xray-core 交互的模块
-│   └── xray_runner.py
+├── docs/                   # 项目文档和调试笔记
+│   ├── README.md
+│   ├── DEBUGGING_WINDOWS.md
+│   ├── TROUBLESHOOTING.md
+│   └── ...
+├── core/                   # 与 Sing-box 交互的模块
+│   └── singbox_runner.py
 ├── parsers/                # 各类订阅格式的解析器
 │   ├── base_parser.py
 │   └── clash_parser.py
@@ -137,3 +142,16 @@ crontab -e
 │   └── logger.py
 └── results/                # 存放日志和结果
 ```
+
+---
+
+## 📚 相关文档
+
+更多详细文档和调试信息，请查看 [docs/](docs/) 文件夹：
+
+- **[快速开始指南](docs/QUICK_START.md)** - 项目快速入门
+- **[故障排除](docs/TROUBLESHOOTING.md)** - 常见问题解决方案
+- **[Windows 调试](docs/DEBUGGING_WINDOWS.md)** - Windows 环境开发和调试
+- **[技术报告](docs/)** - 项目技术文档和变更记录
+
+完整文档索引请查看：[docs/README.md](docs/README.md)
