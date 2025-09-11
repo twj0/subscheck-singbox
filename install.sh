@@ -124,7 +124,7 @@ if [ ! -f "requirements.txt" ]; then
     echo -e "aiohttp\nPyYAML\nrich" > requirements.txt
 fi
 echo "Installing Python packages with uv (using Tsinghua mirror)..."
-uv pip install -r requirements.txt
+uv pip install -r requirements.txt --system
 mkdir -p results
 
 # --- Final Instructions ---
