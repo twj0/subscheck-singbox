@@ -1,28 +1,21 @@
 #!/bin/bash
-# This script ensures that the main.py is executed from the project's root directory
-# and logs its output for cron jobs.
+# This script ensures that the main.py is executed using the Python interpreter
+# from the project's virtual environment (.venv).
 
-# Get the absolute path of the directory where the script is located
+# Get the absolute directory where the script is located
 DIR="$( cd "$( dirname "${BASH_SOURCE}" )" &> /dev/null && pwd )"
 
-# Change to the script's directory to ensure all relative paths in the python script work correctly
-cd "$DIR"
+# Define the path to the virtual environment's Python executable
+VENV_PYTHON="$DIR/.venv/bin/python3"
 
-# Create results directory if it doesn't exist
-mkdir -p results
-
-# Find the python executable.
-# Prefer 'python3' if available, otherwise use 'python'.
-if command -v python3 &> /dev/null
-then
-    PYTHON_EXEC="python3"
-else
-    PYTHON_EXEC="python"
+# Check if the venv python exists
+if [ ! -f "$VENV_PYTHON" ]; then
+    echo "Error: Python interpreter not found at $VENV_PYTHON"
+    echo "Please run the install.sh script first to set up the virtual environment."
+    exit 1
 fi
 
-# Run the main python script.
-# The '>>' appends the output to the log file.
-# '2>&1' redirects stderr to stdout, so both are captured in the log file.
-echo "--- Running SubCheck cron job at $(date) ---" >> results/cron.log
-$PYTHON_EXEC main.py --file subscription.txt --config config.yaml >> results/cron.log 2>&1
-echo "--- SubCheck cron job finished at $(date) ---" >> results/cron.log
+# Change to the script's directory and execute main.py using the venv python
+# Append output to a log file in the results directory.
+cd "$DIR"
+"$VENV_PYTHON" main.py >> "$DIR/results/cron.log" 2>&1
