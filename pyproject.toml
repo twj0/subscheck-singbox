@@ -1,0 +1,11 @@
+[project]
+name = "subscheck-ubuntu"
+version = "0.1.0"
+description = "这是一个部署在中国大陆的ubuntu24vps进行网速和延迟测速的项目"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "yaml",
+    "aiohttp",
+    "rich"
+]

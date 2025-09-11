@@ -1,0 +1,37 @@
+# SubCheck Project Configuration
+
+general_settings:
+  max_nodes_to_test: 100 # -1 to test all nodes
+  concurrency: 20        # Number of nodes to test simultaneously
+
+test_settings:
+  timeout: 10              # Timeout in seconds for latency tests
+  speed_test_duration: 8   # Duration in seconds for speed tests
+
+# URLs for testing latency and speed.
+# It's crucial to have both international and mainland China endpoints.
+test_urls:
+  latency:
+    - http://cp.cloudflare.com/generate_204  # Cloudflare (International)
+    - https://www.google.com/generate_204    # Google (International)
+    - https://connect.rom.miui.com/generate_204 # Xiaomi (Mainland China)
+    - http://www.baidu.com/generate_204       # Baidu (Mainland China)
+  
+  speed:
+    # A good mix of international and domestic large file providers
+    - http://cachefly.cachefly.net/10mb.test   # Cachefly (International)
+    - https://speed.cloudflare.com/__down?bytes=10000000 # Cloudflare Speed Test
+    - https://speedtest.sh.chinamobile.com/speedtest/5g/10m # China Mobile Shanghai
+    - http://speedtest1.online.sh.cn:8080/download/10MB.zip # Shanghai Telecom
+
+output_settings:
+  results_dir: "results"
+  top_n_results: 50
+  generate_best_nodes_subscription: true # Whether to generate a new sub file with best nodes
+
+# Scheduler settings for automatic testing using cron
+scheduler:
+  enabled: true
+  # Cron expression: minute hour day(month) month day(week)
+  # This example means "at minute 0 of every 6th hour" (e.g., 00:00, 06:00, 12:00, 18:00)
+  cron_expression: "0 */6 * * *"
