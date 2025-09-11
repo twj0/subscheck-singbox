@@ -1,6 +1,6 @@
 #!/bin/bash
 # SubCheck Project - Final Installation Script for Ubuntu 24.04
-# - Uses python3-pip and a Tsinghua mirror to reliably install uv.
+# - Correctly handles PEP 668 by using pipx to install uv.
 # - Auto-detects root user to handle sudo correctly.
 # - Uses a GitHub accelerator for Xray and --local install for containers.
 
@@ -14,22 +14,17 @@ fi
 echo "--- [1/6] Updating system packages ---"
 $SUDO_CMD apt update && $SUDO_CMD apt upgrade -y
 
-echo "--- [2/6] Installing essential tools (git, curl, unzip) ---"
-$SUDO_CMD apt install -y git curl unzip
+echo "--- [2/6] Installing essential tools (git, curl, unzip, python3-pip) ---"
+$SUDO_CMD apt install -y git curl unzip python3-pip
 
-echo "--- [3/6] Installing Python and Pip ---"
-$SUDO_CMD apt install -y python3-pip
+echo "--- [3/6] Installing pipx ---"
+$SUDO_CMD apt install -y pipx
+# Add pipx's path to the current session
+export PATH="$PATH:$HOME/.local/bin"
 
-echo "--- [4/6] Configuring Pip and Installing uv ---"
-echo "Configuring pip to use Tsinghua University mirror..."
-pip3 config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
-
-echo "Installing uv using pip..."
-pip3 install uv
-
-# Add the local bin directory to PATH for the current session to find uv
-export PATH="$HOME/.local/bin:$PATH"
-echo "uv installed successfully."
+echo "--- [4/6] Installing uv using pipx ---"
+pipx install uv
+echo "uv installed successfully via pipx."
 
 echo "--- [5/6] Installing Xray-core (using GitHub accelerator & --local flag) ---"
 XRAY_INSTALL_URL="https://ghfast.top/https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh"
@@ -46,7 +41,9 @@ if [ ! -f "requirements.txt" ]; then
     echo "rich" >> requirements.txt
 fi
 
-echo "Installing Python packages with uv (from Tsinghua mirror)..."
+# We don't need a Tsinghua mirror for uv itself, but uv will respect pip's config if set.
+# For simplicity, we'll let uv use its default fast resolver.
+echo "Installing Python packages with uv..."
 uv pip install -r requirements.txt
 mkdir -p results
 
