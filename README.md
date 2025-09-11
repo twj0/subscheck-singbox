@@ -25,7 +25,7 @@ SubCheck 是一个专为中国大陆用户设计的高性能代理节点测试�
 
 ### 1. 克隆项目
 
-登录到您的 Ubuntu 服务器，并克隆本仓库：
+登录到您的 vps，并克隆本仓库：
 
 ```bash
 git clone https://github.com/twj0/subscheck-ubuntu.git
