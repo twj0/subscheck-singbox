@@ -40,7 +40,7 @@ echo "--- [4/5] Installing Xray-core (using GitHub accelerator) ---"
 # --- [FIX 3] Use ghfast.top to accelerate the download ---
 XRAY_INSTALL_URL="https://ghfast.top/https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh"
 echo "Downloading Xray install script from: $XRAY_INSTALL_URL"
-bash -c "$($SUDO_CMD curl -L $XRAY_INSTALL_URL)" -- @ install
+bash -c "$($SUDO_CMD curl -L $XRAY_INSTALL_URL)" -- @ install --local
 
 echo "Xray-core installation complete."
 
