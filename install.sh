@@ -1,7 +1,7 @@
 #!/bin/bash
 # SubCheck Project - Final Installation Script for Ubuntu 24.04
 # - Correctly handles PEP 668 by using pipx to install uv.
-# - Auto-detects root user to handle sudo correctly.
+# - Uses a robust `bash -s` pipe for Xray installation.
 # - Uses a GitHub accelerator for Xray and --local install for containers.
 
 set -e
@@ -29,7 +29,8 @@ echo "uv installed successfully via pipx."
 echo "--- [5/6] Installing Xray-core (using GitHub accelerator & --local flag) ---"
 XRAY_INSTALL_URL="https://ghfast.top/https://raw.githubusercontent.com/XTLS/Xray-install/main/install-release.sh"
 echo "Downloading Xray install script from: $XRAY_INSTALL_URL"
-bash -c "$($SUDO_CMD curl -L $XRAY_INSTALL_URL)" -- @ install --local
+# --- [FINAL FIX] Use a more robust bash pipe for execution ---
+$SUDO_CMD curl -L $XRAY_INSTALL_URL | $SUDO_CMD bash -s -- @ install --local
 
 echo "Xray-core installation complete."
 
@@ -41,8 +42,6 @@ if [ ! -f "requirements.txt" ]; then
     echo "rich" >> requirements.txt
 fi
 
-# We don't need a Tsinghua mirror for uv itself, but uv will respect pip's config if set.
-# For simplicity, we'll let uv use its default fast resolver.
 echo "Installing Python packages with uv..."
 uv pip install -r requirements.txt
 mkdir -p results
