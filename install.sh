@@ -27,10 +27,20 @@ echo "--- [2/5] Installing essential tools (git, curl, unzip) ---"
 $SUDO_CMD apt install -y git curl unzip
 
 echo "--- [3/5] Installing uv (a fast Python package installer) ---"
+# --- [FIX 4] Accelerate uv download for mainland China environments ---
+# The official installer allows overriding the download URL via an environment variable.
+# We construct the URL for the aarch64 version (common on modern VPS) and prepend our accelerator.
+# Note: If this script were for universal use, we'd need to detect the architecture first.
+UV_VERSION="0.8.17" # Update this if the installer changes
+UV_ARCH="aarch64-unknown-linux-gnu"
+UV_BASE_URL="https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-${UV_ARCH}.tar.gz"
+export UV_DOWNLOAD_URL="https://ghfast.top/${UV_BASE_URL}"
+
+echo "Using accelerated download URL for uv: $UV_DOWNLOAD_URL"
 curl -LsSf https://astral.sh/uv/install.sh | sh
+unset UV_DOWNLOAD_URL # Unset the variable after use (good practice)
 
 # --- [FIX 2] Correctly source the uv environment path ---
-# The uv installer explicitly tells us to use this path.
 echo "Activating uv environment..."
 source "$HOME/.local/bin/env"
 
