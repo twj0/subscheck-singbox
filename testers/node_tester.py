@@ -1,6 +1,7 @@
 # testers/node_tester.py
 import asyncio
 import time
+import os
 import aiohttp
 from typing import Dict, Optional, List, Any
 
@@ -250,6 +251,12 @@ class NodeTester:
         
         log.debug(f"开始速度测试，尝试 {len(test_urls)} 个测试URL")
         
+        # 首先测试SOCKS5代理是否真的能转发流量
+        proxy_test_result = await self._test_proxy_http_forwarding(proxy_url)
+        if not proxy_test_result:
+            log.debug("SOCKS5代理无法转发HTTP流量，跳过速度测试")
+            return None
+        
         # 尝试每个测试URL
         for i, test_url in enumerate(test_urls, 1):
             log.debug(f"尝试第 {i}/{len(test_urls)} 个测试URL: {test_url}")
@@ -264,8 +271,176 @@ class NodeTester:
         log.debug("所有速度测试URL都失败")
         return None
     
+    async def _test_proxy_http_forwarding(self, proxy_url: str) -> bool:
+        """测试SOCKS5代理是否能正常转发HTTP流量"""
+        try:
+            # 使用更简单的测试方法
+            import socket
+            import struct
+            
+            # 解析代理URL
+            proxy_parts = proxy_url[9:].split(':')  # 去掉socks5://
+            proxy_host = proxy_parts[0]
+            proxy_port = int(proxy_parts[1])
+            
+            # 创建socket连接到代理
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            
+            try:
+                sock.connect((proxy_host, proxy_port))
+                
+                # SOCKS5握手
+                sock.send(b'\x05\x01\x00')
+                response = sock.recv(2)
+                
+                if len(response) != 2 or response[0] != 5:
+                    return False
+                
+                # 尝试连接到google.com:80
+                target_host = "www.google.com"
+                target_port = 80
+                
+                # 构造SOCKS5连接请求
+                request = b'\x05\x01\x00\x03'  # SOCKS5, CONNECT, 保留字节, 域名类型
+                request += bytes([len(target_host)])  # 域名长度
+                request += target_host.encode()  # 域名
+                request += struct.pack('>H', target_port)  # 端口（大端序）
+                
+                sock.send(request)
+                response = sock.recv(10)
+                
+                if len(response) >= 2 and response[1] == 0:  # 连接成功
+                    log.debug("SOCKS5代理能够转发HTTP流量")
+                    return True
+                else:
+                    log.debug(f"SOCKS5代理连接失败，响应代码: {response[1] if len(response) > 1 else 'unknown'}")
+                    return False
+                    
+            finally:
+                sock.close()
+                
+        except Exception as e:
+            log.debug(f"代理转发测试失败: {type(e).__name__}: {e}")
+            return False
+    
     async def _test_single_speed_url(self, proxy_url: str, test_url: str, duration: int, timeout: aiohttp.ClientTimeout) -> Optional[float]:
         """Tests download speed for a single URL."""
+        try:
+            # Windows下aiohttp的SOCKS5支持有问题，使用替代方案
+            if os.name == 'nt':  # Windows环境
+                return await self._test_speed_via_socket(proxy_url, test_url, duration)
+            
+            # Linux环境使用aiohttp
+            return await self._test_speed_via_aiohttp(proxy_url, test_url, duration, timeout)
+            
+        except Exception as e:
+            log.debug(f"速度测试异常: {type(e).__name__}: {e}")
+            return None
+    
+    async def _test_speed_via_socket(self, proxy_url: str, test_url: str, duration: int) -> Optional[float]:
+        """使用socket直接通过SOCKS5代理下载（Windows环境）"""
+        try:
+            import socket
+            import struct
+            from urllib.parse import urlparse
+            
+            # 解析URL
+            parsed_url = urlparse(test_url)
+            target_host = parsed_url.hostname
+            target_port = parsed_url.port or 80
+            path = parsed_url.path or '/'
+            
+            # 解析代理
+            proxy_parts = proxy_url[9:].split(':')
+            proxy_host = proxy_parts[0]
+            proxy_port = int(proxy_parts[1])
+            
+            log.debug(f"使用Socket方法下载: {target_host}:{target_port}{path}")
+            
+            # 创建连接
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(duration + 10)
+            
+            try:
+                # 连接到SOCKS5代理
+                sock.connect((proxy_host, proxy_port))
+                
+                # SOCKS5握手
+                sock.send(b'\x05\x01\x00')
+                response = sock.recv(2)
+                if len(response) != 2 or response[0] != 5:
+                    return None
+                
+                # 连接到目标服务器
+                request = b'\x05\x01\x00\x03'
+                request += bytes([len(target_host)])
+                request += target_host.encode()
+                request += struct.pack('>H', target_port)
+                
+                sock.send(request)
+                response = sock.recv(10)
+                if len(response) < 2 or response[1] != 0:
+                    return None
+                
+                # 发送HTTP请求
+                http_request = f"GET {path} HTTP/1.1\r\n"
+                http_request += f"Host: {target_host}\r\n"
+                http_request += "Connection: close\r\n"
+                http_request += "User-Agent: SubsCheck-Ubuntu/1.0\r\n"
+                http_request += "\r\n"
+                
+                sock.send(http_request.encode())
+                
+                # 读取响应
+                start_time = time.monotonic()
+                downloaded_bytes = 0
+                header_end = False
+                
+                while True:
+                    elapsed = time.monotonic() - start_time
+                    if elapsed >= duration:
+                        break
+                    
+                    try:
+                        sock.settimeout(1.0)  # 短超时以便检查时间
+                        data = sock.recv(8192)
+                        if not data:
+                            break
+                        
+                        if not header_end:
+                            # 找到HTTP响应头结束标记
+                            if b'\r\n\r\n' in data:
+                                header_end_pos = data.find(b'\r\n\r\n') + 4
+                                data = data[header_end_pos:]  # 只计算body的字节数
+                                header_end = True
+                        
+                        downloaded_bytes += len(data)
+                        
+                    except socket.timeout:
+                        continue
+                    except Exception:
+                        break
+                
+                final_elapsed = time.monotonic() - start_time
+                
+                if final_elapsed > 0 and downloaded_bytes > 0:
+                    speed_bps = (downloaded_bytes * 8) / final_elapsed
+                    speed_mbps = speed_bps / (1024 * 1024)
+                    log.debug(f"Socket下载成功: {downloaded_bytes}字节, {final_elapsed:.2f}秒, {speed_mbps:.2f}Mbps")
+                    return round(speed_mbps, 2)
+                    
+                return None
+                
+            finally:
+                sock.close()
+                
+        except Exception as e:
+            log.debug(f"Socket下载失败: {type(e).__name__}: {e}")
+            return None
+    
+    async def _test_speed_via_aiohttp(self, proxy_url: str, test_url: str, duration: int, timeout: aiohttp.ClientTimeout) -> Optional[float]:
+        """Tests download speed for a single URL using aiohttp."""
         try:
             # 使用更适合的连接器配置
             connector = aiohttp.TCPConnector(
