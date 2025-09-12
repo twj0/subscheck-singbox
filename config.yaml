@@ -1,31 +1,49 @@
-# SubCheck Sing-box Configuration
+# SubsCheck-Ubuntu 项目完整配置
+# 基于 sing-box 的高性能代理节点测速工具
+# 作者: subscheck-ubuntu team
 
-general_settings:
-  max_nodes_to_test: 100 # -1 to test all nodes
-  concurrency: 20        # Number of nodes to test simultaneously
-
+# 基本设置
 test_settings:
-  timeout: 10              # Timeout in seconds for latency tests
-  speed_test_duration: 8   # Duration in seconds for speed tests
-  latency_urls:            # URLs for latency testing
-    - http://cp.cloudflare.com/generate_204  # Cloudflare (International)
-    - https://www.google.com/generate_204    # Google (International)
-    - https://connect.rom.miui.com/generate_204 # Xiaomi (Mainland China)
-    - http://www.baidu.com/generate_204       # Baidu (Mainland China)
-  speed_urls:              # URLs for speed testing
-    - http://cachefly.cachefly.net/10mb.test   # Cachefly (International)
-    - https://speed.cloudflare.com/__down?bytes=10000000 # Cloudflare Speed Test
-    - https://speedtest.sh.chinamobile.com/speedtest/5g/10m # China Mobile Shanghai
-    - http://speedtest1.online.sh.cn:8080/download/10MB.zip # Shanghai Telecom
+  max_test_nodes: 50        # 最大测试节点数
+  concurrency: 6            # 并发测试数 (Ubuntu VPS 优化)
+  timeout: 10               # 超时时间(秒)
+  
+  # 延迟测试URLs
+  latency_urls:
+    - "http://www.gstatic.com/generate_204"
+    - "http://cp.cloudflare.com/generate_204"
+    - "http://connectivitycheck.platform.hicloud.com/generate_204"
+  
+  # 速度测试设置
+  speed_url: "http://speedtest.tele2.net/10MB.zip"
+  speed_test_duration: 8    # 速度测试持续时间(秒)
 
-output_settings:
-  results_dir: "results"
-  top_n_results: 50
-  generate_best_nodes_subscription: true # Whether to generate a new sub file with best nodes
+# 测试模式配置
+test_modes:
+  connectivity_test: true   # HTTP连通性测试
+  speed_test: true         # 下载速度测试
+  tcp_ping: false          # TCP端口连通测试(轻量模式)
 
-# Scheduler settings for automatic testing using cron
-scheduler:
-  enabled: true
-  # Cron expression: minute hour day(month) month day(week)
-  # This example means "at minute 0 of every 6th hour" (e.g., 00:00, 06:00, 12:00, 18:00)
-  cron_expression: "0 */6 * * *"
+# 输出和结果设置
+output:
+  show_top_nodes: 20       # 显示前N个最佳节点
+  save_all_results: true   # 保存完整结果
+  results_dir: "results"   # 结果保存目录
+  
+# VPS 环境优化
+vps_optimization:
+  enable: true             # 启用VPS优化
+  memory_limit: true       # 内存使用限制
+  
+# 网络设置  
+network:
+  dns_servers:             # DNS服务器列表
+    - "223.5.5.5"          # 阿里DNS
+    - "8.8.8.8"            # Google DNS
+  user_agent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:91.0) Gecko/20100101 Firefox/91.0"
+
+# 日志设置
+logging:
+  level: "INFO"            # 日志级别: DEBUG, INFO, WARNING, ERROR
+  save_logs: true          # 保存日志到文件
+  log_file: "logs/subscheck.log"

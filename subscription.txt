@@ -2,77 +2,53 @@
 # 高质量聚合订阅源 (Base64/Mixed格式)
 # ================================
 
-# 主流聚合源 - 使用中国大陆加速
-https://ghfast.top/https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray
-https://ghfast.top/https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt
-https://ghfast.top/https://raw.githubusercontent.com/mahdibland/SSAggregator/master/sub/sub_merge.txt
-https://ghfast.top/https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2
-https://ghfast.top/https://raw.githubusercontent.com/Pawdroid/Free-servers/refs/heads/main/sub
-https://ghfast.top/https://raw.githubusercontent.com/xiaoji235/airport-free/refs/heads/main/v2ray.txt
 
-# 节点聚合源 - 使用gh-proxy加速
-https://gh-proxy.com/https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/merged.txt
+https://gh-proxy.com/https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray
+https://gh-proxy.com/https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt
+https://gh-proxy.com/https://raw.githubusercontent.com/mahdibland/SSAggregator/master/sub/sub_merge.txt
+https://gh-proxy.com/https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2
+https://gh-proxy.com/https://raw.githubusercontent.com/Pawdroid/Free-servers/refs/heads/main/sub
+
+
 https://gh-proxy.com/https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/yudou66.txt
 https://gh-proxy.com/https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/nodefree.txt
 https://gh-proxy.com/https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/v2rayshare.txt
-https://gh-proxy.com/https://raw.githubusercontent.com/ggborr/FREEE-VPN/refs/heads/main/3V2ray
 
-# 专业节点收集源
-https://ghfast.top/https://raw.githubusercontent.com/Leon406/SubCrawler/refs/heads/main/sub/share/a11
-https://ghfast.top/https://raw.githubusercontent.com/Leon406/SubCrawler/refs/heads/main/sub/share/vless
-https://ghfast.top/https://raw.githubusercontent.com/Leon406/SubCrawler/refs/heads/main/sub/share/hysteria2
-https://ghfast.top/https://raw.githubusercontent.com/iboxz/free-v2ray-collector/refs/heads/main/main/mix
-https://ghfast.top/https://raw.githubusercontent.com/ts-sf/fly/main/v2
 
-# 国际配置源
+https://gh-proxy.com/https://raw.githubusercontent.com/Leon406/SubCrawler/refs/heads/main/sub/share/a11
+https://gh-proxy.com/https://raw.githubusercontent.com/Leon406/SubCrawler/refs/heads/main/sub/share/vless
+https://gh-proxy.com/https://raw.githubusercontent.com/ts-sf/fly/main/v2
+
 https://gh-proxy.com/https://raw.githubusercontent.com/Epodonios/v2ray-configs/refs/heads/main/All_Configs_Sub.txt
-https://gh-proxy.com/https://raw.githubusercontent.com/barry-far/V2ray-Configs/refs/heads/main/All_Configs_Sub.txt
 https://gh-proxy.com/https://raw.githubusercontent.com/MrMohebi/xray-proxy-grabber-telegram/master/collected-proxies/row-url/all.txt
 
-# CDN 加速源 (推荐)
+
 https://cdn.jsdelivr.net/gh/chengaopan/AutoMergePublicNodes@master/list.txt
 https://fastly.jsdelivr.net/gh/chengaopan/AutoMergePublicNodes@master/list.txt
 https://cdn.staticaly.com/gh/chengaopan/AutoMergePublicNodes/master/list.txt
 
-# Base64 专用源
-https://ghfast.top/https://gcore.jsdelivr.net/gh/linzjian666/chromego_extractor@main/outputs/base64.txt
+https://gh-proxy.com/https://raw.githubusercontent.com/anaer/Sub/master/sub.list
+https://fastly.jsdelivr.net/gh/anaer/Sub@master/sub.list
 
 # ================================
 # Clash YAML 配置源
 # ================================
 
 # 主流Clash源
-https://ghfast.top/https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.meta.yml
-https://ghfast.top/https://raw.githubusercontent.com/ripaojiedian/freenode/main/clash
-https://ghfast.top/https://raw.githubusercontent.com/vxiaov/free_proxies/main/clash/clash.provider.yaml
+https://gh-proxy.com/https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.meta.yml
+https://gh-proxy.com/https://raw.githubusercontent.com/ripaojiedian/freenode/main/clash
+https://gh-proxy.com/https://raw.githubusercontent.com/vxiaov/free_proxies/main/clash/clash.provider.yaml
 
 # 高质量Clash聚合
-https://ghfast.top/https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.yml
-https://ghfast.top/https://raw.githubusercontent.com/qjlxg/aggregator/main/data/clash.yaml
-https://ghfast.top/https://raw.githubusercontent.com/anaer/Sub/main/clash.yaml
-https://ghfast.top/https://raw.githubusercontent.com/mfuu/v2ray/master/clash.yaml
+https://gh-proxy.com/https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.yml
+https://gh-proxy.com/https://raw.githubusercontent.com/anaer/Sub/main/clash.yaml
+https://gh-proxy.com/https://raw.githubusercontent.com/mfuu/v2ray/master/clash.yaml
 
 # 专业Clash源
-https://ghfast.top/https://raw.githubusercontent.com/Flikify/getNode/main/clash.yaml
-https://ghfast.top/https://raw.githubusercontent.com/Ruk1ng001/freeSub/main/clash.yaml
-https://ghfast.top/https://raw.githubusercontent.com/snakem982/proxypool/main/source/clash-meta.yaml
+https://gh-proxy.com/https://raw.githubusercontent.com/Flikify/getNode/main/clash.yaml
+https://gh-proxy.com/https://raw.githubusercontent.com/snakem982/proxypool/main/source/clash-meta.yaml
 https://cdn.jsdelivr.net/gh/itxve/fetch-clash-node/node/merge.yaml
 
-# ================================
-# 第三方订阅服务 (可能不稳定)
-# ================================
 
-# 动态订阅源 - 谨慎使用
-https://qzfl.cscfwoker.fun/wxgqlfx
-https://juzi8186-sr1.pages.dev/juzi?sub=owo.o00o.ooo&proxyip=sjc.o00o.ooo
+https://gh-proxy.com/https://gist.githubusercontent.com/Yu9191/07a366dfe7e1669d1fe2e7ba8c945047/raw/VPN.txt
 
-# Gist 源 - 备用
-https://ghfast.top/https://gist.githubusercontent.com/Yu9191/07a366dfe7e1669d1fe2e7ba8c945047/raw/VPN.txt
-
-# ================================
-# 说明:
-# - 使用 ghfast.top 和 gh-proxy.com 加速 GitHub 访问
-# - 移除了重复和可能失效的链接
-# - 按格式和质量分类组织
-# - 建议定期检查和更新失效链接
-# ================================

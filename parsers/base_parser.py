@@ -1,288 +1,184 @@
 # parsers/base_parser.py
 import base64
 import json
-from typing import Optional, Dict
-from urllib.parse import urlparse, parse_qs, unquote
+import urllib.parse
+from typing import Optional, Dict, Any
 
 from utils.logger import log
 
-def parse_node_url(url: str) -> Optional[Dict]:
-    """Parses a node URL (vmess, vless, trojan, ss, ssr) and returns a dictionary."""
-    if not url or not isinstance(url, str):
-        return None
-        
-    url = url.strip()
-    if not url:
-        return None
-        
-    if url.startswith('vmess://'):
-        return _parse_vmess_url(url)
-    elif url.startswith('vless://'):
-        return _parse_vless_url(url)
-    elif url.startswith('trojan://'):
-        return _parse_trojan_url(url)
-    elif url.startswith('ss://'):
-        return _parse_shadowsocks_url(url)
-    elif url.startswith('ssr://'):
-        return _parse_shadowsocksr_url(url)
-    elif url.startswith('hysteria://') or url.startswith('hysteria2://'):
-        log.debug(f"Hysteria协议暂不支持: {url[:50]}...")
-        return None
-    elif url.startswith('tuic://'):
-        log.debug(f"TUIC协议暂不支持: {url[:50]}...")
-        return None
-    else:
-        log.debug(f"不支持的协议: {url[:50]}...")
-        return None
-
-def _parse_vmess_url(url: str) -> Optional[Dict]:
-    """Parses a vmess:// URL."""
+def parse_node_url(url: str) -> Optional[Dict[str, Any]]:
+    """Parses a node URL and dispatches to the correct parser."""
     try:
-        decoded_part = base64.b64decode(url[8:]).decode('utf-8')
-        vmess_config = json.loads(decoded_part)
-        
-        return {
-            'name': vmess_config.get('ps', vmess_config.get('add', 'VMess')),
-            'type': 'vmess',
-            'server': vmess_config['add'],
-            'port': int(vmess_config['port']),
-            'uuid': vmess_config['id'],
-            'alterId': int(vmess_config.get('aid', 0)),
-            'security': vmess_config.get('scy', 'auto'),
-            'network': vmess_config.get('net', 'tcp'),
-            'tls': vmess_config.get('tls', '') == 'tls',
-            'sni': vmess_config.get('sni', vmess_config.get('host', vmess_config['add']))
-        }
-    except Exception as e:
-        log.warning(f"Failed to parse VMess URL: {e}")
-        return None
-
-def _parse_vless_url(url: str) -> Optional[Dict]:
-    """Parses a vless:// URL."""
-    try:
-        parsed_url = urlparse(url)
-        query_params = parse_qs(parsed_url.query)
-        
-        uuid = parsed_url.username
-        server = parsed_url.hostname
-        port = parsed_url.port
-        
-        if not uuid or not server or port is None:
-            log.warning(f"VLESS URL缺少必要参数: {url[:100]}...")
+        # 预处理URL，移除异常字符
+        url = url.strip()
+        if not url:
             return None
-        
-        # 处理IPv6地址中的端口解析问题
-        if isinstance(port, str):
-            try:
-                port = int(port)
-            except (ValueError, TypeError):
-                log.warning(f"VLESS URL端口格式错误 '{port}': {url[:100]}...")
-                return None
-        
-        if not isinstance(port, int) or port <= 0 or port > 65535:
-            log.warning(f"VLESS URL端口无效 '{port}': {url[:100]}...")
+            
+        if url.startswith('vless://'):
+            return _parse_vless(url)
+        elif url.startswith('vmess://'):
+            return _parse_vmess(url)
+        elif url.startswith('trojan://'):
+            return _parse_trojan(url)
+        elif url.startswith('ss://'):
+            return _parse_shadowsocks(url)
+        elif url.startswith('ssr://'):
+            log.debug(f"SSR协议不支持，跳过: {url[:30]}...")
             return None
-
-        return {
-            'name': unquote(parsed_url.fragment) if parsed_url.fragment else f"{server}:{port}",
-            'type': 'vless',
-            'server': server,
-            'port': port,
-            'uuid': uuid,
-            'security': query_params.get('security', ['none'])[0] if query_params.get('security') else 'none',
-            'network': query_params.get('type', ['tcp'])[0] if query_params.get('type') else 'tcp',
-            'sni': query_params.get('sni', [server])[0] if query_params.get('sni') else server,
-            'host': query_params.get('host', [server])[0] if query_params.get('host') else server,
-            'path': query_params.get('path', ['/'])[0] if query_params.get('path') else '/'
-        }
+        elif url.startswith('hysteria2://') or url.startswith('hysteria://'):
+            log.debug(f"Hysteria协议不支持，跳过: {url[:30]}...")
+            return None
+        else:
+            log.debug(f"Unsupported protocol: {url[:30]}...")
+            return None
     except Exception as e:
-        log.warning(f"解析VLESS URL失败: {e}")
+        log.debug(f"Failed to parse node URL: {url[:50]}..., Error: {e}")
         return None
 
-def _parse_trojan_url(url: str) -> Optional[Dict]:
-    """Parses a trojan:// URL."""
-    try:
-        parsed_url = urlparse(url)
-        query_params = parse_qs(parsed_url.query)
+def _parse_vless(url: str) -> Dict[str, Any]:
+    parsed_url = urllib.parse.urlparse(url)
+    params = urllib.parse.parse_qs(parsed_url.query)
+    
+    # 确保端口是有效的整数
+    port = parsed_url.port
+    if port is None:
+        log.debug(f"VLESS URL missing port: {url[:50]}...")
+        return None
+    
+    # 获取网络类型和相关参数
+    network = params.get('type', ['tcp'])[0]
+    
+    node_data = {
+        'name': urllib.parse.unquote(parsed_url.fragment) if parsed_url.fragment else f"{parsed_url.hostname}:{port}",
+        'type': 'vless',
+        'server': parsed_url.hostname,
+        'port': int(port),
+        'uuid': parsed_url.username,
+        'security': params.get('security', ['none'])[0],
+        'sni': params.get('sni', [parsed_url.hostname])[0],
+        'network': network
+    }
+    
+    # 添加网络类型相关参数
+    if network in ['ws', 'websocket']:
+        node_data['path'] = params.get('path', ['/'])[0]
+        node_data['headers'] = params.get('host', [''])[0]
+    elif network == 'grpc':
+        node_data['serviceName'] = params.get('serviceName', params.get('grpc-service-name', ['']))[0]
+    elif network in ['h2', 'http']:
+        node_data['path'] = params.get('path', ['/'])[0]
+        node_data['headers'] = params.get('host', [''])[0]
+    
+    return node_data
 
-        password = parsed_url.username
-        server = parsed_url.hostname
-        port_str = str(parsed_url.port)
+def _parse_vmess(url: str) -> Optional[Dict[str, Any]]:
+    try:
+        encoded_part = url[8:]
+        decoded_bytes = base64.b64decode(encoded_part)
+        config = json.loads(decoded_bytes.decode('utf-8'))
+        
+        # 确保端口是有效的整数
+        port = config.get('port')
+        if port is None:
+            log.debug(f"VMess config missing port: {config}")
+            return None
         
         try:
-            port = int(port_str)
+            port = int(port)
         except (ValueError, TypeError):
-            log.warning(f"Invalid port '{port_str}' in Trojan URL, skipping node: {url[:100]}...")
+            log.debug(f"VMess config invalid port '{port}': {config}")
             return None
-
-        return {
-            'name': unquote(parsed_url.fragment) if parsed_url.fragment else server,
-            'type': 'trojan',
-            'server': server,
+        
+        # 扩展网络类型支持
+        network = config.get('net', 'tcp')
+        node_data = {
+            'name': config.get('ps', f"{config.get('add', 'N/A')}:{port}"),
+            'type': 'vmess',
+            'server': config['add'],
             'port': port,
-            'password': password,
-            'sni': query_params.get('sni', [server])[0] if query_params.get('sni') else server
+            'uuid': config['id'],
+            'alterId': int(config.get('aid', 0)),
+            'security': config.get('scy', 'auto'),
+            'network': network,
+            'tls': config.get('tls', '') == 'tls',
+            'sni': config.get('sni', config['add'])
         }
+        
+        # 添加网络类型相关参数
+        if network in ['ws', 'websocket']:
+            node_data['path'] = config.get('path', '/')
+            node_data['headers'] = config.get('host', '')
+        elif network == 'grpc':
+            node_data['serviceName'] = config.get('serviceName', config.get('grpc-service-name', ''))
+        elif network in ['h2', 'http']:
+            node_data['path'] = config.get('path', '/')
+            node_data['headers'] = config.get('host', '')
+        
+        return node_data
+        
     except Exception as e:
-        log.warning(f"Failed to parse Trojan URL: {e}")
+        log.debug(f"Failed to parse VMess URL: {e}")
         return None
 
-def _parse_shadowsocks_url(url: str) -> Optional[Dict]:
-    """Parses a ss:// (Shadowsocks) URL."""
+def _parse_trojan(url: str) -> Dict[str, Any]:
+    parsed_url = urllib.parse.urlparse(url)
+    
+    # 确保端口是有效的整数
+    port = parsed_url.port
+    if port is None:
+        log.debug(f"Trojan URL missing port: {url[:50]}...")
+        return None
+    
+    return {
+        'name': urllib.parse.unquote(parsed_url.fragment) if parsed_url.fragment else f"{parsed_url.hostname}:{port}",
+        'type': 'trojan',
+        'server': parsed_url.hostname,
+        'port': int(port),
+        'password': parsed_url.username,
+        'sni': urllib.parse.parse_qs(parsed_url.query).get('sni', [parsed_url.hostname])[0]
+    }
+
+def _parse_shadowsocks(url: str) -> Dict[str, Any]:
+    """Parse Shadowsocks URL format."""
     try:
-        # 移除 'ss://' 前缀
-        encoded_part = url[5:]
+        parsed_url = urllib.parse.urlparse(url)
         
-        # 检查是否有 fragment (节点名称)
-        if '#' in encoded_part:
-            encoded_part, fragment = encoded_part.split('#', 1)
-            name = unquote(fragment)
+        # 确保端口是有效的整数
+        port = parsed_url.port
+        if port is None:
+            log.debug(f"Shadowsocks URL missing port: {url[:50]}...")
+            return None
+        
+        # Handle both formats: ss://method:password@host:port and ss://base64@host:port
+        if parsed_url.username and parsed_url.password:
+            # Format: ss://method:password@host:port
+            method = parsed_url.username
+            password = parsed_url.password
         else:
-            name = None
-        
-        # 尝试多种解析方式
-        node = None
-        
-        # 方式1: 标准SIP002格式 - method:password@server:port (base64编码)
-        try:
-            decoded = base64.b64decode(encoded_part).decode('utf-8')
-            node = _parse_ss_standard_format(decoded, name)
-            if node:
-                return node
-        except Exception:
-            pass
-        
-        # 方式2: SIP002格式 - method:password@server:port (明文)
-        try:
-            node = _parse_ss_standard_format(encoded_part, name)
-            if node:
-                return node
-        except Exception:
-            pass
-        
-        # 方式3: 新格式 - ss://base64(method:password)@server:port
-        try:
+            # Format: ss://base64@host:port
+            encoded_part = parsed_url.username or url[5:]  # Remove 'ss://'
             if '@' in encoded_part:
-                auth_part, server_part = encoded_part.split('@', 1)
-                try:
-                    decoded_auth = base64.b64decode(auth_part).decode('utf-8')
-                    if ':' in decoded_auth:
-                        method, password = decoded_auth.split(':', 1)
-                        node = _parse_ss_server_part(server_part, method, password, name)
-                        if node:
-                            return node
-                except Exception:
-                    pass
-        except Exception:
-            pass
-        
-        log.debug(f"无法解析Shadowsocks URL: {url[:50]}...")
-        return None
-        
-    except Exception as e:
-        log.debug(f"解析Shadowsocks URL时发生错误: {e}")
-        return None
-
-def _parse_ss_standard_format(content: str, name: Optional[str]) -> Optional[Dict]:
-    """解析标准SS格式: method:password@server:port"""
-    if '@' not in content:
-        return None
-        
-    auth_part, server_part = content.split('@', 1)
-    
-    if ':' not in auth_part:
-        return None
-        
-    method, password = auth_part.split(':', 1)
-    
-    return _parse_ss_server_part(server_part, method, password, name)
-
-def _parse_ss_server_part(server_part: str, method: str, password: str, name: Optional[str]) -> Optional[Dict]:
-    """解析SS的服务器部分"""
-    try:
-        # 处理IPv6地址的情况
-        if server_part.startswith('['):
-            # IPv6 格式: [::1]:8080
-            bracket_end = server_part.find(']')
-            if bracket_end == -1:
+                encoded_part = encoded_part.split('@')[0]
+            
+            # Add padding if needed
+            missing_padding = len(encoded_part) % 4
+            if missing_padding:
+                encoded_part += '=' * (4 - missing_padding)
+            
+            decoded = base64.b64decode(encoded_part, validate=False).decode('utf-8')
+            if ':' in decoded:
+                method, password = decoded.split(':', 1)
+            else:
                 return None
-            server = server_part[1:bracket_end]
-            port_part = server_part[bracket_end+1:]
-            if not port_part.startswith(':'):
-                return None
-            port_str = port_part[1:]
-        else:
-            # IPv4 格式: 1.2.3.4:8080 或域名格式
-            if ':' not in server_part:
-                return None
-            server, port_str = server_part.rsplit(':', 1)
-        
-        try:
-            port = int(port_str)
-            if port <= 0 or port > 65535:
-                return None
-        except ValueError:
-            return None
         
         return {
-            'name': name or f"{server}:{port}",
+            'name': urllib.parse.unquote(parsed_url.fragment) if parsed_url.fragment else f"{parsed_url.hostname}:{port}",
             'type': 'shadowsocks',
-            'server': server,
-            'port': port,
+            'server': parsed_url.hostname,
+            'port': int(port),
             'method': method,
             'password': password
         }
-    except Exception:
-        return None
-
-def _parse_shadowsocksr_url(url: str) -> Optional[Dict]:
-    """Parses a ssr:// (ShadowsocksR) URL."""
-    try:
-        # 移除 'ssr://' 前缀并解码 base64
-        encoded_part = url[6:]
-        decoded = base64.b64decode(encoded_part).decode('utf-8')
-        
-        # SSR 格式: server:port:protocol:method:obfs:password_base64/?params
-        if '?' in decoded:
-            main_part, params_part = decoded.split('?', 1)
-            params = parse_qs(params_part)
-        else:
-            main_part = decoded
-            params = {}
-        
-        parts = main_part.split(':', 5)
-        if len(parts) != 6:
-            log.debug(f"Invalid ShadowsocksR format: {url[:50]}...")
-            return None
-        
-        server, port_str, protocol, method, obfs, password_b64 = parts
-        
-        try:
-            port = int(port_str)
-            password = base64.b64decode(password_b64).decode('utf-8')
-        except (ValueError, Exception):
-            log.debug(f"Invalid data in ShadowsocksR URL: {url[:50]}...")
-            return None
-        
-        # 获取节点名称
-        name = None
-        if 'remarks' in params:
-            try:
-                name = base64.b64decode(params['remarks'][0]).decode('utf-8')
-            except Exception:
-                pass
-        
-        return {
-            'name': name or f"{server}:{port}",
-            'type': 'shadowsocksr',
-            'server': server,
-            'port': port,
-            'protocol': protocol,
-            'method': method,
-            'obfs': obfs,
-            'password': password
-        }
-        
     except Exception as e:
-        log.debug(f"Failed to parse ShadowsocksR URL: {e}")
+        log.debug(f"Failed to parse Shadowsocks URL: {e}")
         return None

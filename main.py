@@ -1,235 +1,329 @@
-# main.py
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+SubsCheck-Ubuntu: 基于Sing-box的代理节点测速工具
+作者: subscheck-ubuntu team
+受到 tmpl/subs-check 和 tmpl/SubsCheck-Win-GUI 项目启发
+"""
+
 import asyncio
 import argparse
 import yaml
-import base64
-from pathlib import Path
-from typing import List, Dict, Set, Tuple
-
 import aiohttp
-from rich.table import Table
-from rich.console import Console
+import time
+from pathlib import Path
+from typing import List, Dict, Any
+from datetime import datetime
+import json
 
+# 导入项目模块
 from utils.logger import log
-from parsers import clash_parser, base_parser
+from parsers.base_parser import parse_node_url
+from parsers.clash_parser import parse_clash_config
 from testers.node_tester import NodeTester
 
-console = Console()
-
-async def fetch_subscription_content(url: str, session: aiohttp.ClientSession) -> str:
-    """Fetches content from a single subscription URL."""
-    max_retries = 2
-    retry_delay = 1.0
+class SubsCheckUbuntu:
+    """
+    SubsCheck-Ubuntu 主类
+    使用 Sing-box 作为代理核心进行高性能节点测试
+    """
     
-    for attempt in range(max_retries + 1):
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.tester = NodeTester(config)
+        
+    async def fetch_subscription_content(self, url: str) -> str:
+        """获取订阅内容"""
         try:
-            timeout = aiohttp.ClientTimeout(total=15, connect=10)
-            async with session.get(url, timeout=timeout) as response:
-                if response.status == 200:
-                    content = await response.text()
-                    return content
-                else:
-                    log.warning(f"订阅源返回错误状态 {response.status}: {url}")
-                    
-        except asyncio.TimeoutError:
-            log.warning(f"订阅源访问超时 (第{attempt+1}次尝试): {url}")
+            timeout = aiohttp.ClientTimeout(total=15)
+            headers = {
+                'User-Agent': self.config['network']['user_agent']
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=timeout, headers=headers) as response:
+                    if response.status == 200:
+                        content = await response.text()
+                        log.info(f"订阅获取成功: {url[:50]}...")
+                        return content
+                    else:
+                        log.warning(f"订阅返回错误 {response.status}: {url}")
         except Exception as e:
-            log.warning(f"订阅源访问失败 (第{attempt+1}次尝试): {url} - {e}")
-        
-        if attempt < max_retries:
-            await asyncio.sleep(retry_delay)
-            retry_delay *= 1.5  # 递增延迟
+            log.error(f"订阅获取失败: {e}")
+        return ""
     
-    return ""
-
-def parse_content(content: str) -> List[Dict]:
-    """Intelligently parses content, trying YAML then Base64/Plaintext."""
-    try:
-        config = yaml.safe_load(content)
-        if isinstance(config, dict) and 'proxies' in config:
-            log.info("Detected Clash (YAML) format, parsing proxies...")
-            return clash_parser.parse_clash_proxies(config['proxies'])
-    except yaml.YAMLError:
-        pass # Not a valid YAML, proceed to next method
-
-    try:
-        # It's common for the entire file to be base64 encoded.
-        decoded_content = base64.b64decode(content).decode('utf-8')
-        log.info("Detected Base64 encoded content, decoding...")
-        content = decoded_content
-    except Exception:
-        # Decoding failed, treat as plaintext.
-        log.info("Not Base64 or YAML, processing as a list of plaintext links...")
-        pass
-
-    nodes = []
-    for line in content.strip().split('\n'):
-        node = base_parser.parse_node_url(line.strip())
-        if node:
-            nodes.append(node)
-    return nodes
-
-def deduplicate_nodes(nodes: List[Dict]) -> List[Dict]:
-    """Removes duplicate nodes based on server, port, and type."""
-    seen: Set[Tuple[str, int, str]] = set()
-    unique_nodes = []
-    for node in nodes:
-        # Use a tuple of key properties to identify a unique node
-        key = (node.get('server', ''), int(node.get('port', 0)), node.get('type', ''))
-        if key not in seen:
-            seen.add(key)
-            unique_nodes.append(node)
-    return unique_nodes
-
-def save_and_display_results(results: List[Dict], config: Dict):
-    """Sorts, saves, and prints results in a table."""
-    success_nodes = [r for r in results if r['status'] == 'success']
-    # Sort by download speed (desc) then latency (asc)
-    success_nodes.sort(key=lambda x: (x.get('download_speed', 0), -x.get('http_latency', 9999)), reverse=True)
-
-    output_settings = config['output_settings']
-    results_dir = Path(output_settings['results_dir'])
-    results_dir.mkdir(exist_ok=True)
-
-    # Save full results to JSON
-    # ... (Logic for saving to JSON can be added here if needed)
-
-    log.info(f"Results will be saved to the '{results_dir}' directory.")
-
-    # Display top N results in a table
-    top_n = output_settings['top_n_results']
-    table = Table(title=f"Top {top_n} Nodes")
-    table.add_column("Rank", style="cyan")
-    table.add_column("Name", style="magenta", max_width=40, overflow="ellipsis")
-    table.add_column("Speed (Mbps)", style="green")
-    table.add_column("Latency (ms)", style="yellow")
-    
-    for i, node in enumerate(success_nodes[:top_n]):
-        speed = f"{node.get('download_speed', 0):.2f}"
-        latency = f"{node.get('http_latency', 0):.2f}"
-        table.add_row(str(i + 1), node['name'], speed, latency)
-    
-    console.print(table)
-
-async def main():
-    parser = argparse.ArgumentParser(description="SubCheck - A subscription node tester.")
-    parser.add_argument('-f', '--file', default='subscription.txt', help="Path to the subscription file.")
-    parser.add_argument('-c', '--config', default='config.yaml', help="Path to the configuration file.")
-    args = parser.parse_args()
-
-    config_path = Path(args.config)
-    if not config_path.exists():
-        log.error(f"Configuration file not found: {config_path}")
-        return
+    def parse_subscription_content(self, content: str) -> List[Dict[str, Any]]:
+        """智能解析订阅内容"""
+        nodes = []
         
-    with open(config_path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
-
-    sub_file = Path(args.file)
-    if not sub_file.exists():
-        log.error(f"Subscription file not found: {sub_file}")
-        return
-
-    urls = [line.strip() for line in sub_file.read_text(encoding='utf-8').splitlines() 
-            if line.strip() and not line.startswith('#')]
-    log.info(f"Found {len(urls)} subscription links.")
+        # 尝试YAML解析 (Clash 格式)
+        try:
+            config_data = yaml.safe_load(content)
+            if isinstance(config_data, dict) and 'proxies' in config_data:
+                log.info("检测到Clash YAML格式")
+                clash_nodes = parse_clash_config(config_data)
+                nodes.extend(clash_nodes)
+                return nodes
+        except Exception:
+            pass
+        
+        # 尝试Base64解码
+        try:
+            import base64
+            decoded = base64.b64decode(content.strip()).decode('utf-8')
+            if any(proto in decoded for proto in ['vless://', 'vmess://', 'trojan://', 'ss://']):
+                log.info("检测到Base64编码内容")
+                content = decoded
+        except Exception:
+            pass
+        
+        # 解析链接
+        for line in content.strip().split('\n'):
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            
+            node = parse_node_url(line)
+            if node:
+                nodes.append(node)
+        
+        return nodes
     
-    if not urls:
-        log.error("No valid subscription URLs found.")
-        return
-
-    # 使用连接池优化网络请求
-    connector = aiohttp.TCPConnector(
-        limit=20,
-        limit_per_host=5,
-        keepalive_timeout=30,
-        enable_cleanup_closed=True
-    )
+    def deduplicate_nodes(self, nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """节点去重"""
+        seen = set()
+        unique_nodes = []
+        
+        for node in nodes:
+            try:
+                # 使用服务器、端口和类型作为唯一标识
+                key = (node['server'], node['port'], node['type'])
+                if key not in seen:
+                    seen.add(key)
+                    unique_nodes.append(node)
+            except (KeyError, TypeError):
+                continue
+        
+        return unique_nodes
     
-    tester = None
-    try:
-        async with aiohttp.ClientSession(
-            headers={'User-Agent': 'SubCheck/1.0'}, 
-            connector=connector,
-            timeout=aiohttp.ClientTimeout(total=30)
-        ) as session:
-            # 串行获取订阅内容以避免过多并发连接
-            contents = []
-            for url in urls:
-                content = await fetch_subscription_content(url, session)
-                if content:
-                    contents.append(content)
-                await asyncio.sleep(0.1)  # 限制请求频率
-
-        all_nodes = []
-        valid_contents = [content for content in contents if content.strip()]
-        log.info(f"Successfully fetched {len(valid_contents)} subscription contents.")
+    async def test_nodes(self, nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """批量测试节点"""
+        if not nodes:
+            log.warning("没有节点可以测试")
+            return []
         
-        for content in valid_contents:
-            if content:
-                nodes = parse_content(content)
-                if nodes:
-                    all_nodes.extend(nodes)
+        log.info(f"开始测试 {len(nodes)} 个节点...")
         
-        unique_nodes = deduplicate_nodes(all_nodes)
-        log.info(f"Total nodes: {len(all_nodes)}, Unique nodes: {len(unique_nodes)}")
+        # 并发测试
+        semaphore = asyncio.Semaphore(self.config['test_settings']['concurrency'])
         
-        if not unique_nodes:
-            log.error("No valid nodes found from all subscriptions.")
+        async def test_with_limit(node: Dict[str, Any], index: int) -> Dict[str, Any]:
+            async with semaphore:
+                return await self.tester.test_single_node(node, index)
+        
+        # 创建任务
+        tasks = [test_with_limit(node, i) for i, node in enumerate(nodes)]
+        
+        # 执行测试
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # 处理结果
+        valid_results = []
+        for result in results:
+            if isinstance(result, Exception):
+                log.error(f"测试异常: {result}")
+            else:
+                valid_results.append(result)
+        
+        return valid_results
+    
+    def save_results(self, results: List[Dict[str, Any]]) -> str:
+        """保存测试结果"""
+        results_dir = Path(self.config['output']['results_dir'])
+        results_dir.mkdir(exist_ok=True)
+        
+        # 筛选成功的结果并按延迟排序
+        success_results = [r for r in results if r['status'] == 'success']
+        success_results.sort(key=lambda x: x.get('http_latency', 9999))
+        
+        # 生成结果文件
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = results_dir / f"subscheck_results_{timestamp}.json"
+        
+        result_data = {
+            'timestamp': datetime.now().isoformat(),
+            'total_tested': len(results),
+            'success_count': len(success_results),
+            'success_rate': f"{len(success_results)/len(results)*100:.1f}%" if results else "0%",
+            'test_config': {
+                'max_nodes': self.config['test_settings']['max_test_nodes'],
+                'concurrency': self.config['test_settings']['concurrency'],
+                'timeout': self.config['test_settings']['timeout']
+            },
+            'top_nodes': success_results[:self.config['output']['show_top_nodes']],
+            'all_results': results if self.config['output']['save_all_results'] else success_results
+        }
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(result_data, f, indent=2, ensure_ascii=False)
+        
+        log.info(f"结果已保存: {filename}")
+        return str(filename)
+    
+    def display_results(self, results: List[Dict[str, Any]]):
+        """显示测试结果"""
+        success_results = [r for r in results if r['status'] == 'success']
+        
+        if not success_results:
+            log.warning("没有成功的节点")
             return
         
-        nodes_to_test = unique_nodes
-        max_nodes = config['general_settings']['max_nodes_to_test']
-        if max_nodes != -1 and len(unique_nodes) > max_nodes:
-            # Sort nodes by name before slicing to ensure consistency
-            unique_nodes.sort(key=lambda n: n.get('name', ''))
-            nodes_to_test = unique_nodes[:max_nodes]
-            log.info(f"Testing the first {max_nodes} nodes.")
-
-        tester = NodeTester(config)
-        concurrency = min(config['general_settings']['concurrency'], len(nodes_to_test), 10)  # 限制并发数
-        semaphore = asyncio.Semaphore(concurrency)
+        # 按延迟排序
+        success_results.sort(key=lambda x: x.get('http_latency', 9999))
         
-        async def test_with_semaphore(node, index):
-            async with semaphore:
-                return await tester.test_single_node(node, index)
-
-        log.info(f"Starting tests with concurrency: {concurrency}")
-        test_tasks = [test_with_semaphore(node, i) for i, node in enumerate(nodes_to_test)]
-        results = await asyncio.gather(*test_tasks, return_exceptions=True)
+        print(f"\n{'=' * 80}")
+        print(f"测试结果统计")
+        print(f"{'=' * 80}")
+        print(f"总测试节点: {len(results)}")
+        print(f"成功节点: {len(success_results)}")
+        print(f"成功率: {len(success_results)/len(results)*100:.1f}%")
         
-        # 处理异常结果
-        processed_results = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                log.error(f"Node {i+1} test failed with exception: {result}")
-                processed_results.append({
-                    'name': nodes_to_test[i].get('name', 'Unknown'),
-                    'status': 'failed',
-                    'error': str(result)
-                })
-            else:
-                processed_results.append(result)
+        # 显示最佳节点
+        show_count = min(self.config['output']['show_top_nodes'], len(success_results))
+        if show_count > 0:
+            print(f"\n最佳节点 (前{show_count}个):")
+            print(f"{'-' * 80}")
+            print(f"{'#':<3} {'Name':<35} {'Latency':<10} {'Speed':<12} {'Server':<20}")
+            print(f"{'-' * 80}")
+            
+            for i, node in enumerate(success_results[:show_count]):
+                latency = f"{node.get('http_latency', 0):.0f}ms" if node.get('http_latency') else "N/A"
+                speed = f"{node.get('download_speed', 0):.2f}Mbps" if node.get('download_speed') else "N/A"
+                print(f"{i+1:<3} {node['name'][:34]:<35} {latency:<10} {speed:<12} {node['server']:<20}")
+    
+    async def run(self, subscription_file: str):
+        """主运行流程"""
+        start_time = time.time()
         
-        save_and_display_results(processed_results, config)
+        log.info("=" * 60)
+        log.info("SubsCheck-Ubuntu v1.0 - 基于Sing-box的代理节点测速工具")
+        log.info("=" * 60)
         
-    except Exception as e:
-        log.error(f"Main execution failed: {e}")
-    finally:
-        # 确保清理资源
-        if tester:
-            try:
-                await tester.cleanup()
-            except Exception as e:
-                log.warning(f"Cleanup failed: {e}")
+        # 检查订阅文件
+        sub_file = Path(subscription_file)
+        if not sub_file.exists():
+            log.error(f"订阅文件不存在: {subscription_file}")
+            return
+        
+        # 读取订阅链接
+        with open(sub_file, 'r', encoding='utf-8') as f:
+            urls = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+        
+        log.info(f"发现 {len(urls)} 个订阅链接")
+        
+        if not urls:
+            log.error("没有找到有效的订阅链接")
+            return
+        
+        # 获取所有节点
+        all_nodes = []
+        for i, url in enumerate(urls, 1):
+            log.info(f"正在获取订阅 {i}/{len(urls)}: {url[:50]}...")
+            content = await self.fetch_subscription_content(url)
+            if content:
+                nodes = self.parse_subscription_content(content)
+                all_nodes.extend(nodes)
+                log.info(f"从订阅解析到 {len(nodes)} 个节点")
+        
+        if not all_nodes:
+            log.error("没有解析到有效节点")
+            return
+        
+        # 去重
+        unique_nodes = self.deduplicate_nodes(all_nodes)
+        log.info(f"去重后共 {len(unique_nodes)} 个节点")
+        
+        # 限制测试数量
+        max_test_nodes = self.config['test_settings']['max_test_nodes']
+        if len(unique_nodes) > max_test_nodes:
+            unique_nodes = unique_nodes[:max_test_nodes]
+            log.info(f"限制测试节点数量为 {max_test_nodes}")
         
         try:
-            await connector.close()
-        except:
-            pass
+            # 测试节点
+            results = await self.test_nodes(unique_nodes)
+            
+            # 显示结果
+            self.display_results(results)
+            
+            # 保存结果
+            result_file = self.save_results(results)
+            
+            # 统计
+            end_time = time.time()
+            duration = end_time - start_time
+            success_count = len([r for r in results if r['status'] == 'success'])
+            
+            log.info(f"\n测试完成! 耗时: {duration:.1f}s, 成功: {success_count}/{len(results)}")
+            
+        finally:
+            # 清理资源
+            await self.tester.cleanup()
+
+def load_config(config_file: str = 'config.yaml') -> Dict[str, Any]:
+    """加载配置文件"""
+    config_path = Path(config_file)
+    if not config_path.exists():
+        log.error(f"配置文件不存在: {config_file}")
+        raise FileNotFoundError(f"配置文件不存在: {config_file}")
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    
+    log.info(f"配置加载成功: {config_file}")
+    return config
+
+async def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(
+        description="SubsCheck-Ubuntu - 基于Sing-box的代理节点测速工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  python main.py                           # 使用默认配置
+  python main.py -s my_subs.txt           # 指定订阅文件
+  python main.py -c custom_config.yaml    # 指定配置文件
+  python main.py -n 20                    # 限制测试节点数
+        """
+    )
+    
+    parser.add_argument('-s', '--subscription', default='subscription.txt',
+                       help="订阅文件路径 (默认: subscription.txt)")
+    parser.add_argument('-c', '--config', default='config.yaml',
+                       help="配置文件路径 (默认: config.yaml)")
+    parser.add_argument('-n', '--max-nodes', type=int,
+                       help="最大测试节点数 (覆盖配置文件)")
+    parser.add_argument('--version', action='version', version='SubsCheck-Ubuntu v1.0')
+    
+    args = parser.parse_args()
+    
+    try:
+        # 加载配置
+        config = load_config(args.config)
+        
+        # 命令行参数覆盖配置
+        if args.max_nodes:
+            config['test_settings']['max_test_nodes'] = args.max_nodes
+        
+        # 创建并运行测试器
+        checker = SubsCheckUbuntu(config)
+        await checker.run(args.subscription)
+        
+    except KeyboardInterrupt:
+        log.info("用户中断测试")
+    except Exception as e:
+        log.error(f"程序运行失败: {e}")
+        raise
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        log.info("\nProcess interrupted by user.")
+    asyncio.run(main())

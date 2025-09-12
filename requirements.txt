@@ -1,3 +1,21 @@
-aiohttp
-PyYAML
-rich
+# SubsCheck-Ubuntu 核心依赖
+# 作者: subscheck-ubuntu team
+
+# 网络请求
+aiohttp>=3.8.0
+
+# 配置文件解析
+PyYAML>=6.0
+
+# 美化终端输出和日志
+rich>=13.0.0
+
+# 文件监控（配置热重载）
+watchdog>=3.0.0
+
+# 定时任务支持
+croniter>=1.3.0
+
+# Web界面支持（可选）
+# flask>=2.3.0
+# gunicorn>=21.0.0

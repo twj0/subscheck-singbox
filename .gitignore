@@ -7,7 +7,47 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv/
+venv/
+env/
+
+# UV package manager
+.uv-cache/
+
+# Project specific results and logs
+results/*.json
+results/*.log
+*.log
+sing-box.log
+
+# Binary files
+sing-box-*/
+subs-check
+subs-check.exe
+
+# Configuration and test files
+config_*.yaml
+subscription_*test*.txt
+subscription_*debug*.txt
+
+# Development and debugging
+debug/
+temp/
+tmp/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.temp
 tmpl/SubsCheck-Win-GUI/.gitattributes
 tmpl/SubsCheck-Win-GUI/.gitignore
 tmpl/SubsCheck-Win-GUI/about.cs
@@ -40,16 +80,3 @@ tmpl/SubsCheck-Win-GUI/Properties/Resources.Designer.cs
 tmpl/SubsCheck-Win-GUI/Properties/Resources.resx
 tmpl/SubsCheck-Win-GUI/Properties/Settings.Designer.cs
 tmpl/SubsCheck-Win-GUI/Properties/Settings.settings
-
-subcheck_simple.py
-
-prompt/
-debug/app_20250911_210122.log
-debug/app_20250911_210402.log
-debug/app_20250911_210433.log
-debug/app_20250911_210452.log
-debug/app_20250911_212118.log
-sing-box-1.12.5-windows-amd64/sing-box-1.12.5-windows-amd64/LICENSE
-sing-box-1.12.5-windows-amd64/sing-box-1.12.5-windows-amd64/sing-box.exe
-uv.lock
-sing-box.log

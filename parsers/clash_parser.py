@@ -1,6 +1,14 @@
 # parsers/clash_parser.py
+# 作者: subscheck-ubuntu team
 from typing import List, Dict, Optional
 from utils.logger import log
+
+def parse_clash_config(config: Dict) -> List[Dict]:
+    """解析Clash配置文件"""
+    if not isinstance(config, dict) or 'proxies' not in config:
+        return []
+    
+    return parse_clash_proxies(config['proxies'])
 
 def parse_clash_proxies(proxies: List[Dict]) -> List[Dict]:
     """Parses a list of proxy dictionaries from a Clash config."""

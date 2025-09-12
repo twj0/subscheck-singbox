@@ -1,323 +1,254 @@
 # core/singbox_runner.py
-
-import os
-import json
 import asyncio
+import json
 import tempfile
-import socket
+import os
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any
+
 from utils.logger import log
 
-class SingBoxConfig:
-    """Sing-box配置生成器"""
-    
-    @staticmethod
-    def generate_shadowsocks_config(node: Dict, port: int) -> Dict:
-        """生成Shadowsocks配置"""
-        return {
-            "type": "shadowsocks",
-            "tag": "proxy",
-            "server": node['server'],
-            "server_port": node['port'],
-            "method": node['method'],
-            "password": node['password']
-        }
-    
-    @staticmethod
-    def generate_vmess_config(node: Dict, port: int) -> Dict:
-        """生成VMess配置"""
-        outbound = {
-            "type": "vmess",
-            "tag": "proxy",
-            "server": node['server'],
-            "server_port": node['port'],
-            "uuid": node['uuid'],
-            "alter_id": node.get('alterId', 0)
-        }
-        
-        # 处理传输设置
-        if node.get('network') == 'ws':
-            outbound["transport"] = {
-                "type": "ws",
-                "path": node.get('path', '/'),
-                "headers": {
-                    "Host": node.get('host', node['server'])
-                }
-            }
-        
-        # 处理TLS设置
-        if node.get('tls') == 'tls':
-            outbound["tls"] = {
-                "enabled": True,
-                "server_name": node.get('sni', node.get('host', node['server']))
-            }
-        
-        return outbound
-    
-    @staticmethod
-    def generate_vless_config(node: Dict, port: int) -> Dict:
-        """生成VLESS配置"""
-        outbound = {
-            "type": "vless",
-            "tag": "proxy",
-            "server": node['server'],
-            "server_port": node['port'],
-            "uuid": node['uuid']
-        }
-        
-        # 处理传输设置
-        if node.get('network') == 'ws':
-            outbound["transport"] = {
-                "type": "ws",
-                "path": node.get('path', '/'),
-                "headers": {
-                    "Host": node.get('host', node['server'])
-                }
-            }
-        
-        # 处理TLS设置
-        if node.get('tls') == 'tls':
-            outbound["tls"] = {
-                "enabled": True,
-                "server_name": node.get('sni', node.get('host', node['server']))
-            }
-        
-        return outbound
-    
-    @staticmethod
-    def generate_trojan_config(node: Dict, port: int) -> Dict:
-        """生成Trojan配置"""
-        outbound = {
-            "type": "trojan",
-            "tag": "proxy",
-            "server": node['server'],
-            "server_port": node['port'],
-            "password": node['password']
-        }
-        
-        # 处理TLS设置
-        if node.get('tls') == 'tls':
-            outbound["tls"] = {
-                "enabled": True,
-                "server_name": node.get('sni', node.get('host', node['server']))
-            }
-        
-        return outbound
-    
-    @staticmethod
-    def generate_config(node: Dict, port: int) -> Dict:
-        """根据节点类型生成完整的Sing-box配置"""
-        
-        # 根据节点类型生成出站配置
-        node_type = node.get('type', '').lower()
-        
-        if node_type == 'shadowsocks' or node_type == 'ss':
-            outbound = SingBoxConfig.generate_shadowsocks_config(node, port)
-        elif node_type == 'vmess':
-            outbound = SingBoxConfig.generate_vmess_config(node, port)
-        elif node_type == 'vless':
-            outbound = SingBoxConfig.generate_vless_config(node, port)
-        elif node_type == 'trojan':
-            outbound = SingBoxConfig.generate_trojan_config(node, port)
-        else:
-            raise ValueError(f"不支持的节点类型: {node_type}")
-        
-        # 完整的Sing-box配置
-        config = {
-            "log": {
-                "level": "error",
-                "output": "sing-box.log"
-            },
-            "inbounds": [
-                {
-                    "type": "socks",
-                    "tag": "socks-in",
-                    "listen": "127.0.0.1",
-                    "listen_port": port,
-                    "users": []
-                }
-            ],
-            "outbounds": [
-                outbound,
-                {
-                    "type": "direct",
-                    "tag": "direct"
-                }
-            ],
-            "route": {
-                "rules": [
-                    {
-                        "outbound": "proxy"
-                    }
-                ]
-            }
-        }
-        
-        return config
+class singboxRunner:
+    """Manages the lifecycle of a single singbox process for testing a node."""
 
-class SingBoxRunner:
-    """Sing-box运行器，用于启动和管理Sing-box进程"""
-    
-    def __init__(self):
-        self.processes = {}
-        self.executable = self._find_singbox_executable()
-        self.port_range_start = 10800
-        self.port_range_end = 11800
-    
-    def _find_singbox_executable(self) -> str:
-        """查找Sing-box可执行文件"""
+    def __init__(self, node_config: Dict[str, Any], port: int):
+        self._config = self._generate_singbox_config(node_config, port)
+        self._process = None
+        self._config_file_path = None
+
+    async def __aenter__(self):
+        """Starts the singbox process asynchronously."""
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
+            json.dump(self._config, f)
+            self._config_file_path = f.name
+
+        # 获取sing-box的绝对路径，支持Ubuntu环境
+        current_dir = Path(__file__).parent.parent
+        
+        # 多个可能的sing-box路径（Ubuntu环境）
         possible_paths = [
-            "sing-box-1.12.5-windows-amd64/sing-box-1.12.5-windows-amd64/sing-box.exe",
-            "sing-box.exe",
-            "sing-box"
+            current_dir / 'sing-box',  # 项目根目录
+            Path('/usr/local/bin/sing-box'),  # 系统安装路径
+            Path('/usr/bin/sing-box'),  # 标准路径
+            Path('./sing-box'),  # 当前目录
+            # 保留Windows路径兼容性（如果在Windows环境运行）
+            current_dir / 'sing-box-1.12.5-windows-amd64' / 'sing-box-1.12.5-windows-amd64' / 'sing-box.exe',
+            current_dir / 'sing-box.exe'
         ]
         
-        project_root = Path(__file__).parent.parent
-        
+        singbox_path = None
         for path in possible_paths:
-            full_path = project_root / path
-            if full_path.exists():
-                log.debug(f"找到Sing-box可执行文件: {full_path}")
-                return str(full_path)
+            if path.exists():
+                singbox_path = path
+                log.debug(f"找到sing-box可执行文件: {singbox_path}")
+                break
         
-        raise FileNotFoundError("未找到Sing-box可执行文件")
-    
-    def _is_port_available(self, port: int) -> bool:
-        """检查端口是否可用"""
+        if not singbox_path:
+            available_paths = [str(p) for p in possible_paths]
+            raise RuntimeError(f"sing-box可执行文件未找到。查找过的路径: {available_paths}")
+        
+        # 启动sing-box进程，增加错误处理
         try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.bind(('127.0.0.1', port))
-                return True
-        except OSError:
-            return False
-    
-    def _find_available_port(self, preferred_port: int) -> int:
-        """查找可用端口，优先使用首选端口"""
-        # 首先检查首选端口
-        if self._is_port_available(preferred_port):
-            return preferred_port
-        
-        # 在范围内寻找可用端口
-        for port in range(self.port_range_start, self.port_range_end):
-            if port not in self.processes and self._is_port_available(port):
-                return port
-        
-        raise RuntimeError(f"无法在范围 {self.port_range_start}-{self.port_range_end} 内找到可用端口")
-    
-    async def start_singbox(self, node: Dict, port: int) -> Tuple[bool, Optional[asyncio.subprocess.Process], Optional[str]]:
-        """启动Sing-box进程"""
-        config_file = None
-        try:
-            # 确保端口可用
-            if port in self.processes:
-                await self.stop_singbox(port)
-                await asyncio.sleep(1.0)  # 增加等待时间确保端口释放
-            
-            # 查找可用端口
-            actual_port = self._find_available_port(port)
-            if actual_port != port:
-                log.debug(f"端口 {port} 不可用，使用端口 {actual_port}")
-            
-            # 生成配置
-            config = SingBoxConfig.generate_config(node, actual_port)
-            
-            # 创建临时配置文件
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-                json.dump(config, f, indent=2, ensure_ascii=False)
-                config_file = f.name
-            
-            log.debug(f"Sing-box配置文件创建于: {config_file}")
-            
-            # 启动Sing-box
-            process = await asyncio.create_subprocess_exec(
-                self.executable,
-                "run",
-                "-c", config_file,
+            # 根据操作系统设置不同的进程创建标志
+            creation_flags = 0x08000000 if os.name == 'nt' else 0  # Windows下隐藏窗口
+            self._process = await asyncio.create_subprocess_exec(
+                str(singbox_path), 'run', '-c', self._config_file_path,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                creationflags=creation_flags
             )
-            
-            # 等待进程启动，并检查进程状态
-            for _ in range(10):  # 最多检查10次，每次0.2秒
-                await asyncio.sleep(0.2)
-                if process.returncode is not None:
-                    # 进程已退出
-                    break
-                # 检查端口是否已被监听
-                if not self._is_port_available(actual_port):
-                    # 端口已被占用，说明进程启动成功
-                    break
-            
-            if process.returncode is None and not self._is_port_available(actual_port):
-                # 进程仍在运行且端口被占用
-                self.processes[actual_port] = (process, config_file, actual_port)
-                log.debug(f"Sing-box进程启动成功，PID: {process.pid}，端口: {actual_port}")
-                return True, process, None
-            else:
-                # 进程启动失败或已退出
-                if process.returncode is None:
-                    process.terminate()
-                    try:
-                        await asyncio.wait_for(process.wait(), timeout=3.0)
-                    except asyncio.TimeoutError:
-                        process.kill()
-                        await process.wait()
-                
-                stdout, stderr = await process.communicate()
-                error_msg = stderr.decode('utf-8') if stderr else stdout.decode('utf-8')
-                log.error(f"Sing-box启动失败，返回码: {process.returncode}")
-                log.error(f"错误输出: {error_msg}")
-                
-                # 清理临时文件
-                if config_file and os.path.exists(config_file):
-                    try:
-                        os.unlink(config_file)
-                    except Exception as e:
-                        log.warning(f"清理配置文件失败: {e}")
-                
-                return False, None, f"Sing-box启动失败。返回码: {process.returncode}\n错误: {error_msg[:500]}"  # 限制错误信息长度
-                
         except Exception as e:
-            log.error(f"启动Sing-box时发生异常: {e}")
-            return False, None, f"启动Sing-box时发生异常: {e}"
-    
-    async def stop_singbox(self, port: int):
-        """停止指定端口的Sing-box进程"""
-        if port in self.processes:
-            process, config_file, actual_port = self.processes[port]
+            raise RuntimeError(f"sing-box进程启动失败: {e}")
+        
+        # 等待sing-box启动，增加启动检查
+        await asyncio.sleep(3)  # 稍微增加等待时间
+
+        if self._process.returncode is not None:
+            # 读取stderr输出以获取错误信息
+            stderr_output = ""
             try:
-                if process.returncode is None:  # 进程仍在运行
-                    process.terminate()
-                    try:
-                        await asyncio.wait_for(process.wait(), timeout=3.0)
-                        log.debug(f"Sing-box进程 {process.pid} 正常终止")
-                    except asyncio.TimeoutError:
-                        process.kill()
-                        await process.wait()
-                        log.debug(f"Sing-box进程 {process.pid} 被强制终止")
-                else:
-                    log.debug(f"Sing-box进程 {process.pid} 已经退出")
+                stderr_output = await self._process.stderr.read()
+                stderr_output = stderr_output.decode('utf-8', errors='ignore')
             except Exception as e:
-                log.warning(f"终止Sing-box进程时出错: {e}")
+                log.debug(f"读取stderr失败: {e}")
             
-            # 清理临时配置文件
-            if config_file and os.path.exists(config_file):
+            # 检查配置文件是否存在并记录调试信息
+            debug_info = []
+            if self._config_file_path and os.path.exists(self._config_file_path):
+                with open(self._config_file_path, 'r') as f:
+                    config_content = f.read()
+                debug_info.append(f"sing-box配置: {config_content[:500]}...")  # 限制日志长度
+            
+            debug_info.extend([
+                f"sing-box路径: {singbox_path}",
+                f"返回代码: {self._process.returncode}",
+                f"stderr: {stderr_output[:500]}..." if stderr_output else "stderr: 无错误输出"
+            ])
+            
+            for info in debug_info:
+                log.debug(info)
+            
+            raise RuntimeError(f"sing-box启动失败。返回代码: {self._process.returncode}。错误: {stderr_output[:200]}...")
+
+        log.debug(f"sing-box进程启动成功，PID: {self._process.pid}，端口: {self._config['inbounds'][0]['listen_port']}")
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Stops the singbox process and cleans up the config file."""
+        if hasattr(self, '_process') and self._process and self._process.returncode is None:
+            try:
+                self._process.terminate()
                 try:
-                    os.unlink(config_file)
-                    log.debug(f"已清理配置文件: {config_file}")
-                except Exception as e:
-                    log.warning(f"清理配置文件失败: {e}")
+                    await asyncio.wait_for(self._process.wait(), timeout=5.0)
+                    log.debug(f"sing-box进程 {self._process.pid} 正常终止")
+                except asyncio.TimeoutError:
+                    self._process.kill()
+                    await self._process.wait()
+                    log.warning(f"sing-box进程 {self._process.pid} 强制终止")
+            except Exception as e:
+                log.debug(f"终止sing-box进程时出错: {e}")
+            finally:
+                # 清理stdout和stderr管道以防止Windows资源警告
+                try:
+                    if hasattr(self._process, 'stdout') and self._process.stdout:
+                        self._process.stdout.close()
+                    if hasattr(self._process, 'stderr') and self._process.stderr:
+                        self._process.stderr.close()
+                except Exception:
+                    pass
+                
+                # Windows下需要额外等待以确保端口释放
+                if os.name == 'nt':
+                    await asyncio.sleep(1.5)
+                else:
+                    await asyncio.sleep(1.0)
+
+        # 清理配置文件
+        if hasattr(self, '_config_file_path') and self._config_file_path and os.path.exists(self._config_file_path):
+            try:
+                os.unlink(self._config_file_path)
+            except Exception as e:
+                log.debug(f"删除配置文件失败: {e}")
+
+    def _generate_singbox_config(self, node: Dict[str, Any], socks_port: int) -> Dict[str, Any]:
+        """Generates a valid singbox configuration for a given node."""
+        config = {
+            "log": {"level": "error"},
+            "inbounds": [{
+                "type": "socks",
+                "listen": "127.0.0.1",
+                "listen_port": socks_port,
+                "sniff": True
+            }],
+            "outbounds": []
+        }
+        outbound: Dict[str, Any] = {"type": node['type'], "tag": "proxy"}
+
+        if node['type'] == 'vless':
+            outbound["server"] = node['server']
+            outbound["server_port"] = int(node['port'])  # 确保端口是整数
+            outbound["uuid"] = node['uuid']
             
-            del self.processes[port]
+            # 处理网络传输类型
+            network = node.get('network', 'tcp')
+            if network in ['ws', 'websocket']:
+                outbound["transport"] = {
+                    "type": "ws",
+                    "path": node.get('path', '/'),
+                    "headers": self._format_headers(node.get('headers', {}))
+                }
+            elif network in ['grpc']:
+                outbound["transport"] = {
+                    "type": "grpc",
+                    "service_name": node.get('serviceName', node.get('grpc-service-name', ''))
+                }
+            elif network in ['h2', 'http']:
+                outbound["transport"] = {
+                    "type": "http",
+                    "path": node.get('path', '/'),
+                    "headers": self._format_headers(node.get('headers', {}))
+                }
+            # 跳过不支持的网络类型
+            elif network in ['xhttp', 'httpupgrade', 'splithttp']:
+                log.debug(f"跳过VLESS不支持的网络类型 {network}，使用TCP")
+                
+            if node.get('security') == 'tls' or node.get('tls'):
+                outbound["tls"] = {
+                    "enabled": True,
+                    "server_name": node.get('sni', node['server']),
+                    "insecure": True
+                }
+
+        elif node['type'] == 'vmess':
+            outbound["server"] = node['server']
+            outbound["server_port"] = int(node['port'])  # 确保端口是整数
+            outbound["uuid"] = node['uuid']
+            outbound["alter_id"] = int(node.get('alterId', 0))
+            outbound["security"] = node.get('security', 'auto')
             
-            # 等待端口释放
-            for _ in range(10):
-                if self._is_port_available(actual_port):
-                    break
-                await asyncio.sleep(0.1)
+            # 处理网络传输类型，适配sing-box支持的类型
+            network = node.get('network', 'tcp')
+            if network in ['ws', 'websocket']:
+                outbound["transport"] = {
+                    "type": "ws",
+                    "path": node.get('path', '/'),
+                    "headers": self._format_headers(node.get('headers', {}))
+                }
+            elif network in ['grpc']:
+                outbound["transport"] = {
+                    "type": "grpc",
+                    "service_name": node.get('serviceName', node.get('grpc-service-name', ''))
+                }
+            elif network in ['h2', 'http']:
+                outbound["transport"] = {
+                    "type": "http",
+                    "path": node.get('path', '/'),
+                    "headers": self._format_headers(node.get('headers', {}))
+                }
+            # 跳过不支持的网络类型，使用默认TCP
+            elif network in ['xhttp', 'httpupgrade', 'splithttp']:
+                log.debug(f"跳过不支持的网络类型 {network}，使用TCP")
+                # 不添加transport字段，默认使用TCP
+                
+            if node.get('tls'):
+                outbound["tls"] = {
+                    "enabled": True,
+                    "server_name": node.get('sni', node['server']),
+                    "insecure": True
+                }
+
+        elif node['type'] == 'trojan':
+            outbound["server"] = node['server']
+            outbound["server_port"] = int(node['port'])  # 确保端口是整数
+            outbound["password"] = node['password']
+            outbound["tls"] = {
+                "enabled": True,
+                "server_name": node.get('sni', node['server']),
+                "insecure": True
+            }
+        
+        elif node['type'] == 'shadowsocks':
+            outbound["server"] = node['server']
+            outbound["server_port"] = int(node['port'])  # 确保端口是整数
+            outbound["method"] = node['method']
+            outbound["password"] = node['password']
+
+        config["outbounds"] = [outbound]
+        return config
     
-    async def cleanup_all(self):
-        """清理所有Sing-box进程"""
-        for port in list(self.processes.keys()):
-            await self.stop_singbox(port)
+    def _format_headers(self, headers) -> Dict[str, str]:
+        """格式化headers为sing-box需要的格式"""
+        if isinstance(headers, dict):
+            return headers
+        elif isinstance(headers, str):
+            # 如果是字符串，尝试解析为字典，失败则设为Host头
+            try:
+                import json
+                return json.loads(headers)
+            except:
+                # 如果解析失败，假设是Host头
+                if headers:
+                    return {"Host": headers}
+                return {}
+        else:
+            return {}
