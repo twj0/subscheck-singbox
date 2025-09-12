@@ -5,6 +5,7 @@ import aiohttp
 from typing import Dict, Optional, List, Any
 
 from core.singbox_runner import singboxRunner
+from testers.direct_proxy_tester import DirectProxyTester
 from utils.logger import log
 
 class NodeTester:
@@ -18,6 +19,9 @@ class NodeTester:
         self._released_ports = {}  # Track when ports were released
         self._port_lock = asyncio.Lock()
         self._port_recycle_delay = 5.0  # 增加端口回收延迟
+        
+        # 初始化直接代理测试器
+        self.direct_tester = DirectProxyTester(timeout=config.get('test_settings', {}).get('timeout', 15))
     
     async def cleanup(self):
         """Clean up any remaining processes."""
@@ -87,35 +91,88 @@ class NodeTester:
         try:
             socks_port = await self._allocate_port(index)
             try:
-                async with singboxRunner(node, socks_port):
+                # 增加更长的启动等待时间
+                async with singboxRunner(node, socks_port) as runner:
+                    # 额外等待确保 sing-box 完全启动
+                    await asyncio.sleep(2)
+                    
                     proxy_url = f"socks5://127.0.0.1:{socks_port}"
+                    log.debug(f"Using proxy: {proxy_url}")
 
-                    # 1. HTTP Latency Test
-                    http_latency = await self._test_connectivity(proxy_url)
-                    result['http_latency'] = http_latency
+                    # 1. 优先进行直接协议测试（不依赖HTTP）
+                    direct_latency = await self.direct_tester.test_node_direct_connectivity(node)
+                    
+                    # 2. 如果直接测试成功，再进行通过sing-box的SOCKS5测试
+                    socks5_latency = None
+                    if direct_latency is not None:
+                        log.debug(f"直接协议测试成功: {direct_latency:.0f}ms")
+                        socks5_latency = await self.direct_tester.test_through_singbox_socks5(
+                            proxy_url, "8.8.8.8", 53
+                        )
+                        if socks5_latency is not None:
+                            log.debug(f"SOCKS5代理测试成功: {socks5_latency:.0f}ms")
+                    
+                    # 3. 如果上述测试都失败，尝试传统的HTTP测试
+                    http_latency = None
+                    if direct_latency is None and socks5_latency is None:
+                        log.debug("直接协议和SOCKS5测试失败，尝试HTTP测试")
+                        http_latency = await self._test_connectivity(proxy_url)
+                    
+                    # 选择最佳的延迟结果
+                    best_latency = None
+                    test_method = "failed"
+                    
+                    if direct_latency is not None:
+                        best_latency = direct_latency
+                        test_method = "direct"
+                    elif socks5_latency is not None:
+                        best_latency = socks5_latency  
+                        test_method = "socks5"
+                    elif http_latency is not None:
+                        best_latency = http_latency
+                        test_method = "http"
+                    
+                    result['http_latency'] = best_latency
+                    log.debug(f"最终测试结果: {test_method} - {best_latency:.0f}ms" if best_latency else f"所有测试方法失败")
 
-                    if http_latency is None:
-                        result['error'] = "HTTP connection failed"
-                        log.warning(f"  ✗ {result['name']} - HTTP connection failed")
+                    if best_latency is None:
+                        result['error'] = "All connectivity tests failed"
+                        log.warning(f"  ✗ {result['name']} - 所有连接测试失败")
                         return result
 
-                    # 2. Download Speed Test
-                    download_speed = await self._test_download_speed(proxy_url)
-                    result['download_speed'] = download_speed
+                    # 4. 只有在连接测试成功时才进行速度测试
+                    download_speed = None
+                    if best_latency is not None:
+                        log.debug(f"开始速度测试...使用代理: {proxy_url}")
+                        
+                        # 先测试SOCKS5代理是否正常工作
+                        socks_test = await self._test_socks5_proxy(proxy_url)
+                        if socks_test:
+                            log.debug("✅ SOCKS5代理可用，继续速度测试")
+                            download_speed = await self._test_download_speed(proxy_url)
+                        else:
+                            log.debug("❌ SOCKS5代理不可用，跳过速度测试")
+                            
+                        result['download_speed'] = download_speed
 
-                    if download_speed is None:
-                        result['error'] = "Speed test failed"
-                        log.warning(f"  ✗ {result['name']} - Speed test failed")
-                        return result
-
-                    result['status'] = 'success'
-                    log.info(f"  ✓ {result['name']} - Latency: {http_latency:.0f}ms | Speed: {download_speed:.2f}Mbps")
+                        if download_speed is None:
+                            log.debug("速度测试失败，但连接测试成功")
+                            # 速度测试失败不影响整体结果，只要连接测试成功即可
+                            result['status'] = 'success'
+                            result['error'] = "Speed test failed but connectivity OK"
+                            log.info(f"  ✓ {result['name']} - 延迟: {best_latency:.0f}ms ({test_method}) | 速度: 测试失败")
+                        else:
+                            result['status'] = 'success'
+                            log.info(f"  ✓ {result['name']} - 延迟: {best_latency:.0f}ms ({test_method}) | 速度: {download_speed:.2f}Mbps")
+                    else:
+                        result['download_speed'] = None
             finally:
                 await self._release_port(socks_port)
 
         except Exception as e:
             result['error'] = str(e)
             log.warning(f"  ✗ {result['name']} - Test failed with exception: {e}")
+            log.debug(f"Exception details: {type(e).__name__}: {e}")
             if 'socks_port' in locals():
                 await self._release_port(socks_port)
 
@@ -126,53 +183,170 @@ class NodeTester:
         latencies = []
         test_urls: List[str] = self.config['test_settings']['latency_urls']
         timeout_seconds: int = self.config['test_settings']['timeout']
-        timeout = aiohttp.ClientTimeout(total=timeout_seconds)
-
-        async with aiohttp.ClientSession() as session:
-            for url in test_urls:
-                try:
-                    start_time = time.monotonic()
-                    async with session.get(url, proxy=proxy_url, timeout=timeout) as response:
-                        if response.status in [200, 204]:
-                            latency = (time.monotonic() - start_time) * 1000
-                            latencies.append(latency)
-                except Exception:
-                    continue
         
-        return sum(latencies) / len(latencies) if latencies else None
+        # 使用更长的连接超时和更短的单次请求超时
+        connector = aiohttp.TCPConnector(
+            limit=10,
+            limit_per_host=3,
+            enable_cleanup_closed=True,
+            force_close=True  # 强制关闭连接，不使用keep-alive
+        )
+        timeout = aiohttp.ClientTimeout(
+            total=timeout_seconds,
+            connect=timeout_seconds // 2,  # 连接超时
+            sock_read=timeout_seconds // 2  # 读取超时
+        )
+
+        try:
+            async with aiohttp.ClientSession(
+                connector=connector,
+                trust_env=False,  # 不使用系统代理
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            ) as session:
+                for url in test_urls:
+                    try:
+                        log.debug(f"Testing connectivity to {url} via {proxy_url}")
+                        start_time = time.monotonic()
+                        
+                        async with session.get(
+                            url, 
+                            proxy=proxy_url, 
+                            timeout=timeout,
+                            allow_redirects=False,  # 不允许重定向以加快测试
+                            ssl=False  # 对于HTTP测试URL禁用SSL验证
+                        ) as response:
+                            elapsed = (time.monotonic() - start_time) * 1000
+                            log.debug(f"Response: {response.status} in {elapsed:.0f}ms")
+                            
+                            if response.status in [200, 204, 301, 302]:
+                                latencies.append(elapsed)
+                            elif response.status >= 400:
+                                log.debug(f"HTTP error {response.status} for {url}")
+                                
+                    except asyncio.TimeoutError:
+                        log.debug(f"Timeout testing {url}")
+                        continue
+                    except Exception as e:
+                        log.debug(f"Error testing {url}: {type(e).__name__}: {e}")
+                        continue
+        except Exception as e:
+            log.debug(f"Session creation error: {type(e).__name__}: {e}")
+            return None
+        
+        if latencies:
+            avg_latency = sum(latencies) / len(latencies)
+            log.debug(f"Average latency: {avg_latency:.0f}ms from {len(latencies)} successful tests")
+            return avg_latency
+        else:
+            log.debug("No successful connectivity tests")
+            return None
 
     async def _test_download_speed(self, proxy_url: str) -> Optional[float]:
         """Tests download speed and returns speed in Mbps."""
-        test_url: str = self.config['test_settings']['speed_url']
+        # 支持多个备用URL
+        test_urls = self.config['test_settings'].get('speed_urls', [self.config['test_settings']['speed_url']])
         duration: int = self.config['test_settings']['speed_test_duration']
-        timeout = aiohttp.ClientTimeout(total=duration + 5) # Add buffer
-
+        timeout = aiohttp.ClientTimeout(total=duration + 15)  # 增加更多缓冲时间
+        
+        log.debug(f"开始速度测试，尝试 {len(test_urls)} 个测试URL")
+        
+        # 尝试每个测试URL
+        for i, test_url in enumerate(test_urls, 1):
+            log.debug(f"尝试第 {i}/{len(test_urls)} 个测试URL: {test_url}")
+            
+            speed_result = await self._test_single_speed_url(proxy_url, test_url, duration, timeout)
+            if speed_result is not None:
+                log.debug(f"速度测试成功，使用URL: {test_url}")
+                return speed_result
+            else:
+                log.debug(f"速度测试失败，URL: {test_url}")
+        
+        log.debug("所有速度测试URL都失败")
+        return None
+    
+    async def _test_single_speed_url(self, proxy_url: str, test_url: str, duration: int, timeout: aiohttp.ClientTimeout) -> Optional[float]:
+        """Tests download speed for a single URL."""
         try:
-            async with aiohttp.ClientSession() as session:
+            # 使用更适合的连接器配置
+            connector = aiohttp.TCPConnector(
+                limit=5,
+                limit_per_host=2,
+                enable_cleanup_closed=True,
+                force_close=True,
+                keepalive_timeout=30
+            )
+            
+            async with aiohttp.ClientSession(
+                connector=connector,
+                trust_env=False,
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            ) as session:
                 start_time = time.monotonic()
                 downloaded_bytes = 0
                 
+                log.debug(f"发起下载请求: GET {test_url}")
+                
                 async with session.get(test_url, proxy=proxy_url, timeout=timeout) as response:
+                    log.debug(f"收到响应: {response.status} {response.reason}")
+                    
                     if response.status != 200:
+                        log.debug(f"下载失败，HTTP状态码: {response.status}")
                         return None
                     
+                    # 检查响应头
+                    content_length = response.headers.get('content-length')
+                    if content_length:
+                        log.debug(f"文件大小: {content_length} 字节")
+                    
+                    chunk_count = 0
+                    last_log_time = start_time
+                    
                     while True:
-                        chunk = await response.content.read(8192)
-                        if not chunk:
+                        try:
+                            chunk = await response.content.read(8192)
+                            if not chunk:
+                                break
+                            
+                            downloaded_bytes += len(chunk)
+                            chunk_count += 1
+                            elapsed_time = time.monotonic() - start_time
+                            
+                            # 每2秒记录一次进度
+                            current_time = time.monotonic()
+                            if current_time - last_log_time >= 2.0:
+                                current_speed = (downloaded_bytes * 8) / elapsed_time / (1024 * 1024)
+                                log.debug(f"下载进度: {downloaded_bytes/1024:.1f}KB, 当前速度: {current_speed:.2f}Mbps")
+                                last_log_time = current_time
+                            
+                            if elapsed_time >= duration:
+                                log.debug(f"达到测试时间限制: {duration}秒")
+                                break
+                                
+                        except asyncio.TimeoutError:
+                            log.debug(f"读取数据超时，已下载: {downloaded_bytes}字节")
                             break
-                        
-                        downloaded_bytes += len(chunk)
-                        elapsed_time = time.monotonic() - start_time
-                        
-                        if elapsed_time >= duration:
+                        except Exception as e:
+                            log.debug(f"读取数据错误: {type(e).__name__}: {e}")
                             break
                 
                 final_elapsed_time = time.monotonic() - start_time
+                log.debug(f"下载完成: {downloaded_bytes}字节，耗时: {final_elapsed_time:.2f}秒")
+                
                 if final_elapsed_time > 0 and downloaded_bytes > 0:
                     speed_bps = (downloaded_bytes * 8) / final_elapsed_time
                     speed_mbps = speed_bps / (1024 * 1024)
+                    log.debug(f"计算速度: {speed_mbps:.2f}Mbps")
                     return round(speed_mbps, 2)
+                else:
+                    log.debug(f"无法计算速度: 时间={final_elapsed_time}, 字节={downloaded_bytes}")
+                    return None
 
-        except Exception:
+        except asyncio.TimeoutError:
+            log.debug(f"速度测试超时: {duration + 15}秒")
             return None
-        return None
+        except aiohttp.ClientError as e:
+            log.debug(f"客户端错误: {type(e).__name__}: {e}")
+            return None
+        except Exception as e:
+            log.debug(f"速度测试异常: {type(e).__name__}: {e}")
+            return None

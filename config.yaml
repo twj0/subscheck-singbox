@@ -4,19 +4,32 @@
 
 # 基本设置
 test_settings:
-  max_test_nodes: 50        # 最大测试节点数
-  concurrency: 6            # 并发测试数 (Ubuntu VPS 优化)
-  timeout: 10               # 超时时间(秒)
+  max_test_nodes: 20        # 减少测试节点数量以提高成功率
+  concurrency: 3            # 降低并发数避免资源冲突
+  timeout: 15               # 增加超时时间
   
-  # 延迟测试URLs
+  # 延迟测试URLs - 使用更可靠的测试地址
   latency_urls:
-    - "http://www.gstatic.com/generate_204"
-    - "http://cp.cloudflare.com/generate_204"
-    - "http://connectivitycheck.platform.hicloud.com/generate_204"
+    - "http://www.gstatic.com/generate_204"  # Google连通性测试
+    - "http://cp.cloudflare.com/generate_204"  # Cloudflare连通性测试
+    - "http://detectportal.firefox.com/success.txt"  # Firefox连通性测试
   
-  # 速度测试设置
-  speed_url: "http://speedtest.tele2.net/10MB.zip"
-  speed_test_duration: 8    # 速度测试持续时间(秒)
+  # 速度测试设置 - 使用海外测试文件通过代理访问
+  speed_urls:  # 支持多个备用URL（海外地址，测试翻墙效果）
+    - "http://cachefly.cachefly.net/10mb.test"  # 主要测试URL
+    - "http://speedtest.wdc01.softlayer.com/downloads/test10.zip"
+    - "http://lg.lax.linode.com/10MB-newark.bin"
+    - "http://speedtest.tele2.net/10MB.zip"  # 备用URL
+  speed_url: "http://cachefly.cachefly.net/10mb.test"  # 主要测试URL（向后兼容）
+  speed_test_duration: 10    # 增加测试时间以获得更准确的结果
+
+# 定时任务配置
+scheduler:
+  enabled: true             # 启用定时任务
+  time: "20:00"             # 中国时间 (Beijing Time)
+  timezone: "Asia/Shanghai"  # 时区设置
+  auto_start: false         # 程序启动时是否自动开启调度器
+  daily: true               # 每日执行
 
 # 测试模式配置
 test_modes:

@@ -19,21 +19,24 @@ class singboxRunner:
     async def __aenter__(self):
         """Starts the singbox process asynchronously."""
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
-            json.dump(self._config, f)
+            json.dump(self._config, f, indent=2)
             self._config_file_path = f.name
 
         # 获取sing-box的绝对路径，支持Ubuntu环境
         current_dir = Path(__file__).parent.parent
         
-        # 多个可能的sing-box路径（Ubuntu环境）
+        # 多个可能的sing-box路径（跨平台支持）
         possible_paths = [
+            # 优先查找根目录中的sing-box.exe（Windows）
+            current_dir / 'sing-box.exe',
+            # 其他Windows环境路径
+            current_dir / 'sing-box-1.12.5-windows-amd64' / 'sing-box-1.12.5-windows-amd64' / 'sing-box.exe',
+            Path('sing-box.exe'),  # 当前工作目录
+            # Ubuntu/Linux环境路径
             current_dir / 'sing-box',  # 项目根目录
             Path('/usr/local/bin/sing-box'),  # 系统安装路径
             Path('/usr/bin/sing-box'),  # 标准路径
             Path('./sing-box'),  # 当前目录
-            # 保留Windows路径兼容性（如果在Windows环境运行）
-            current_dir / 'sing-box-1.12.5-windows-amd64' / 'sing-box-1.12.5-windows-amd64' / 'sing-box.exe',
-            current_dir / 'sing-box.exe'
         ]
         
         singbox_path = None
@@ -47,48 +50,67 @@ class singboxRunner:
             available_paths = [str(p) for p in possible_paths]
             raise RuntimeError(f"sing-box可执行文件未找到。查找过的路径: {available_paths}")
         
+        # 检查配置文件内容
+        log.debug(f"sing-box配置文件: {self._config_file_path}")
+        log.debug(f"sing-box配置内容: {json.dumps(self._config, indent=2)}")
+        
         # 启动sing-box进程，增加错误处理
         try:
             # 根据操作系统设置不同的进程创建标志
             creation_flags = 0x08000000 if os.name == 'nt' else 0  # Windows下隐藏窗口
+            
+            # 设置环境变量，禁用代理
+            env = os.environ.copy()
+            env.pop('HTTP_PROXY', None)
+            env.pop('HTTPS_PROXY', None)
+            env.pop('http_proxy', None)
+            env.pop('https_proxy', None)
+            
             self._process = await asyncio.create_subprocess_exec(
                 str(singbox_path), 'run', '-c', self._config_file_path,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                creationflags=creation_flags
+                creationflags=creation_flags,
+                env=env
             )
         except Exception as e:
             raise RuntimeError(f"sing-box进程启动失败: {e}")
         
         # 等待sing-box启动，增加启动检查
-        await asyncio.sleep(3)  # 稍微增加等待时间
+        await asyncio.sleep(4)  # 增加启动等待时间
 
         if self._process.returncode is not None:
             # 读取stderr输出以获取错误信息
             stderr_output = ""
+            stdout_output = ""
             try:
-                stderr_output = await self._process.stderr.read()
-                stderr_output = stderr_output.decode('utf-8', errors='ignore')
+                if self._process.stderr:
+                    stderr_output = await self._process.stderr.read()
+                    stderr_output = stderr_output.decode('utf-8', errors='ignore')
+                if self._process.stdout:
+                    stdout_output = await self._process.stdout.read()
+                    stdout_output = stdout_output.decode('utf-8', errors='ignore')
             except Exception as e:
-                log.debug(f"读取stderr失败: {e}")
+                log.debug(f"读取输出失败: {e}")
             
             # 检查配置文件是否存在并记录调试信息
             debug_info = []
             if self._config_file_path and os.path.exists(self._config_file_path):
                 with open(self._config_file_path, 'r') as f:
                     config_content = f.read()
-                debug_info.append(f"sing-box配置: {config_content[:500]}...")  # 限制日志长度
+                debug_info.append(f"sing-box配置: {config_content[:800]}...")  # 增加配置详情
             
             debug_info.extend([
                 f"sing-box路径: {singbox_path}",
                 f"返回代码: {self._process.returncode}",
-                f"stderr: {stderr_output[:500]}..." if stderr_output else "stderr: 无错误输出"
+                f"stderr: {stderr_output[:500]}..." if stderr_output else "stderr: 无错误输出",
+                f"stdout: {stdout_output[:500]}..." if stdout_output else "stdout: 无输出"
             ])
             
             for info in debug_info:
                 log.debug(info)
             
-            raise RuntimeError(f"sing-box启动失败。返回代码: {self._process.returncode}。错误: {stderr_output[:200]}...")
+            raise RuntimeError(f"sing-box启动失败。返回代码: {self._process.returncode}。错误: {stderr_output[:300]}...")
 
         log.debug(f"sing-box进程启动成功，PID: {self._process.pid}，端口: {self._config['inbounds'][0]['listen_port']}")
         return self

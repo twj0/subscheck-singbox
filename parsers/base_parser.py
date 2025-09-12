@@ -23,13 +23,30 @@ def parse_node_url(url: str) -> Optional[Dict[str, Any]]:
         elif url.startswith('ss://'):
             return _parse_shadowsocks(url)
         elif url.startswith('ssr://'):
-            log.debug(f"SSR协议不支持，跳过: {url[:30]}...")
+            log.debug(f"SSR协议暂不支持，跳过: {url[:30]}...")
             return None
         elif url.startswith('hysteria2://') or url.startswith('hysteria://'):
-            log.debug(f"Hysteria协议不支持，跳过: {url[:30]}...")
+            log.debug(f"Hysteria协议暂不支持，跳过: {url[:30]}...")
+            return None
+        elif url.startswith('tuic://'):
+            log.debug(f"TUIC协议暂不支持，跳过: {url[:30]}...")
+            return None
+        elif url.startswith('wireguard://') or url.startswith('wg://'):
+            log.debug(f"WireGuard协议暂不支持，跳过: {url[:30]}...")
+            return None
+        elif url.startswith('#') or url.startswith('//'):
+            # 注释行或无效行
+            return None
+        elif url.startswith('http://') or url.startswith('https://'):
+            # 这可能是订阅链接，不是节点链接
             return None
         else:
-            log.debug(f"Unsupported protocol: {url[:30]}...")
+            # 检查是否是其他格式
+            if '://' in url:
+                protocol = url.split('://')[0]
+                log.debug(f"Unsupported protocol '{protocol}': {url[:30]}...")
+            else:
+                log.debug(f"Invalid URL format: {url[:30]}...")
             return None
     except Exception as e:
         log.debug(f"Failed to parse node URL: {url[:50]}..., Error: {e}")
@@ -138,7 +155,7 @@ def _parse_trojan(url: str) -> Dict[str, Any]:
         'sni': urllib.parse.parse_qs(parsed_url.query).get('sni', [parsed_url.hostname])[0]
     }
 
-def _parse_shadowsocks(url: str) -> Dict[str, Any]:
+def _parse_shadowsocks(url: str) -> Optional[Dict[str, Any]]:
     """Parse Shadowsocks URL format."""
     try:
         parsed_url = urllib.parse.urlparse(url)
@@ -155,21 +172,43 @@ def _parse_shadowsocks(url: str) -> Dict[str, Any]:
             method = parsed_url.username
             password = parsed_url.password
         else:
-            # Format: ss://base64@host:port
-            encoded_part = parsed_url.username or url[5:]  # Remove 'ss://'
-            if '@' in encoded_part:
-                encoded_part = encoded_part.split('@')[0]
+            # Format: ss://base64@host:port or ss://base64#fragment
+            encoded_part = parsed_url.username
+            if not encoded_part:
+                # 尝试从完整URL中提取
+                url_without_scheme = url[5:]  # Remove 'ss://'
+                if '@' in url_without_scheme:
+                    encoded_part = url_without_scheme.split('@')[0]
+                elif '#' in url_without_scheme:
+                    encoded_part = url_without_scheme.split('#')[0]
+                else:
+                    encoded_part = url_without_scheme
+            
+            if not encoded_part:
+                log.debug(f"Cannot extract credentials from Shadowsocks URL: {url[:50]}...")
+                return None
             
             # Add padding if needed
             missing_padding = len(encoded_part) % 4
             if missing_padding:
                 encoded_part += '=' * (4 - missing_padding)
             
-            decoded = base64.b64decode(encoded_part, validate=False).decode('utf-8')
+            try:
+                decoded = base64.b64decode(encoded_part, validate=True).decode('utf-8')
+            except Exception as e:
+                log.debug(f"Failed to decode Shadowsocks credentials: {e}")
+                return None
+                
             if ':' in decoded:
                 method, password = decoded.split(':', 1)
             else:
+                log.debug(f"Invalid Shadowsocks credentials format: {decoded}")
                 return None
+        
+        # 验证必需参数
+        if not all([method, password, parsed_url.hostname, port]):
+            log.debug(f"Missing required Shadowsocks parameters: method={method}, password={'***' if password else None}, host={parsed_url.hostname}, port={port}")
+            return None
         
         return {
             'name': urllib.parse.unquote(parsed_url.fragment) if parsed_url.fragment else f"{parsed_url.hostname}:{port}",
