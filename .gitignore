@@ -80,3 +80,6 @@ tmpl/SubsCheck-Win-GUI/Properties/Resources.Designer.cs
 tmpl/SubsCheck-Win-GUI/Properties/Resources.resx
 tmpl/SubsCheck-Win-GUI/Properties/Settings.Designer.cs
 tmpl/SubsCheck-Win-GUI/Properties/Settings.settings
+prompt/gemini_1.md
+prompt/gemini_2.md
+prompt/gemini_3.md
