@@ -116,7 +116,7 @@ install_system_packages() {
     echo -e "${GREEN}--- [2/8] 安装系统基础软件包 ---${NC}"
     
     # 必需的系统包
-    PACKAGES="git curl unzip python3 python3-pip python3-venv jq wget build-essential"
+    PACKAGES="git curl unzip python3 python3-pip python3-venv jq wget build-essential cron"
     
     if [ "$USE_CN_MIRROR" = true ]; then
         echo "使用中国镜像加速安装系统包..."
