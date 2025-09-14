@@ -22,29 +22,61 @@ class singboxRunner:
             json.dump(self._config, f, indent=2)
             self._config_file_path = f.name
 
-        # 获取sing-box的绝对路径，支持Ubuntu环境
+        # 获取sing-box的绝对路径，支持跨平台环境
         current_dir = Path(__file__).parent.parent
         
-        # 多个可能的sing-box路径（跨平台支持）
-        possible_paths = [
-            # 优先查找根目录中的sing-box.exe（Windows）
-            current_dir / 'sing-box.exe',
-            # 其他Windows环境路径
-            current_dir / 'sing-box-1.12.5-windows-amd64' / 'sing-box-1.12.5-windows-amd64' / 'sing-box.exe',
-            Path('sing-box.exe'),  # 当前工作目录
-            # Ubuntu/Linux环境路径
-            current_dir / 'sing-box',  # 项目根目录
-            Path('/usr/local/bin/sing-box'),  # 系统安装路径
-            Path('/usr/bin/sing-box'),  # 标准路径
-            Path('./sing-box'),  # 当前目录
-        ]
+        # 根据操作系统类型配置sing-box路径
+        import platform
+        system = platform.system().lower()
+        
+        if system == "windows":
+            # Windows环境路径
+            possible_paths = [
+                # 优先查找根目录中的sing-box.exe（Windows）
+                current_dir / 'sing-box.exe',
+                # Windows特定路径
+                current_dir / 'sing-box-windows' / 'sing-box.exe',
+                current_dir / 'bin' / 'sing-box.exe',
+                Path('sing-box.exe'),  # 当前工作目录
+                # 系统PATH中查找
+                'sing-box.exe'  # 系统安装的版本
+            ]
+        else:
+            # Linux/Unix环境路径
+            possible_paths = [
+                # 项目根目录
+                current_dir / 'sing-box',
+                current_dir / 'sing-box-linux' / 'sing-box',
+                current_dir / 'bin' / 'sing-box',
+                Path('./sing-box'),  # 当前目录
+                # 系统标准路径
+                Path('/usr/local/bin/sing-box'),
+                Path('/usr/bin/sing-box'),
+                Path('/opt/sing-box/sing-box'),
+                # 用户本地路径
+                Path.home() / '.local/bin/sing-box',
+                # 系统PATH中查找
+                'sing-box'
+            ]
         
         singbox_path = None
+        
+        # 先尝试使用Path对象查找文件
         for path in possible_paths:
-            if path.exists():
-                singbox_path = path
-                log.debug(f"找到sing-box可执行文件: {singbox_path}")
-                break
+            if isinstance(path, str):
+                # 在PATH中查找
+                import shutil
+                found_path = shutil.which(path)
+                if found_path:
+                    singbox_path = Path(found_path)
+                    log.debug(f"在PATH中找到sing-box可执行文件: {singbox_path}")
+                    break
+            else:
+                # 查找文件路径
+                if path.exists():
+                    singbox_path = path
+                    log.debug(f"找到sing-box可执行文件: {singbox_path}")
+                    break
         
         if not singbox_path:
             available_paths = [str(p) for p in possible_paths]

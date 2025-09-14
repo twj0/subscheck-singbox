@@ -1,5 +1,5 @@
 # ================================
-# 高质量聚合订阅源 (Base64/Mixed格式)
+# 聚合订阅源 (Base64/Mixed格式)
 # ================================
 
 
@@ -34,17 +34,15 @@ https://fastly.jsdelivr.net/gh/anaer/Sub@master/sub.list
 # Clash YAML 配置源
 # ================================
 
-# 主流Clash源
+# Clash源
 https://gh-proxy.com/https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.meta.yml
 https://gh-proxy.com/https://raw.githubusercontent.com/ripaojiedian/freenode/main/clash
 https://gh-proxy.com/https://raw.githubusercontent.com/vxiaov/free_proxies/main/clash/clash.provider.yaml
 
-# 高质量Clash聚合
 https://gh-proxy.com/https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.yml
 https://gh-proxy.com/https://raw.githubusercontent.com/anaer/Sub/main/clash.yaml
 https://gh-proxy.com/https://raw.githubusercontent.com/mfuu/v2ray/master/clash.yaml
 
-# 专业Clash源
 https://gh-proxy.com/https://raw.githubusercontent.com/Flikify/getNode/main/clash.yaml
 https://gh-proxy.com/https://raw.githubusercontent.com/snakem982/proxypool/main/source/clash-meta.yaml
 https://cdn.jsdelivr.net/gh/itxve/fetch-clash-node/node/merge.yaml

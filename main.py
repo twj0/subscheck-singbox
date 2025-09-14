@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 SubsCheck-Ubuntu: 基于Sing-box的代理节点测速工具
-作者: subscheck-ubuntu team
-受到 tmpl/subs-check 和 tmpl/SubsCheck-Win-GUI 项目启发
+twj0 | 3150774524@qq.com
 专为中国大陆网络环境设计，使用原生协议测试节点连通性
 """
 
@@ -38,24 +37,65 @@ class SubsCheckUbuntu:
         from utils.logger import get_logger
         self.log = get_logger()
         
-    async def fetch_subscription_content(self, url: str) -> str:
-        """获取订阅内容"""
-        try:
-            timeout = aiohttp.ClientTimeout(total=15)
-            headers = {
-                'User-Agent': self.config['network']['user_agent']
-            }
+    async def fetch_subscription_content(self, url: str, retry_count: int = 3) -> str:
+        """获取订阅内容，支持重试机制"""
+        for attempt in range(retry_count):
+            try:
+                timeout = aiohttp.ClientTimeout(
+                    total=30,  # 增加总超时时间
+                    connect=15,  # 连接超时
+                    sock_read=15  # 读取超时
+                )
+                headers = {
+                    'User-Agent': self.config['network']['user_agent'],
+                    'Accept': '*/*',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'Connection': 'keep-alive'
+                }
+                
+                # 使用更适合的连接器配置
+                connector = aiohttp.TCPConnector(
+                    limit=30,
+                    limit_per_host=10,
+                    ttl_dns_cache=300,
+                    use_dns_cache=True,
+                    enable_cleanup_closed=True
+                )
+                
+                async with aiohttp.ClientSession(
+                    connector=connector, 
+                    timeout=timeout,
+                    trust_env=True  # 使用系统代理设置
+                ) as session:
+                    async with session.get(url, headers=headers) as response:
+                        if response.status == 200:
+                            content = await response.text(encoding='utf-8', errors='ignore')
+                            self.log.info(f"订阅获取成功: {url[:50]}...")
+                            return content
+                        elif response.status in [301, 302, 303, 307, 308]:
+                            # 处理重定向
+                            redirect_url = response.headers.get('Location')
+                            if redirect_url and attempt == 0:  # 只在第一次尝试重定向
+                                self.log.info(f"订阅被重定向到: {redirect_url}")
+                                return await self.fetch_subscription_content(redirect_url, 1)
+                        else:
+                            self.log.warning(f"订阅返回错误 {response.status}: {url}")
+                            
+            except asyncio.TimeoutError:
+                self.log.error(f"订阅获取超时 (attempt {attempt + 1}/{retry_count}): {url[:50]}...")
+            except aiohttp.ClientConnectorError as e:
+                self.log.error(f"订阅连接错误 (attempt {attempt + 1}/{retry_count}): {str(e)[:100]}")
+            except aiohttp.ClientError as e:
+                self.log.error(f"订阅客户端错误 (attempt {attempt + 1}/{retry_count}): {str(e)[:100]}")
+            except Exception as e:
+                self.log.error(f"订阅获取失败 (attempt {attempt + 1}/{retry_count}): {str(e)[:100]}")
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=timeout, headers=headers) as response:
-                    if response.status == 200:
-                        content = await response.text()
-                        self.log.info(f"订阅获取成功: {url[:50]}...")
-                        return content
-                    else:
-                        self.log.warning(f"订阅返回错误 {response.status}: {url}")
-        except Exception as e:
-            self.log.error(f"订阅获取失败: {e}")
+            # 如果不是最后一次尝试，等待后重试
+            if attempt < retry_count - 1:
+                wait_time = 2 ** attempt  # 指数退补
+                self.log.info(f"等待 {wait_time} 秒后重试...")
+                await asyncio.sleep(wait_time)
+        
         return ""
     
     def parse_subscription_content(self, content: str) -> List[Dict[str, Any]]:
@@ -113,35 +153,92 @@ class SubsCheckUbuntu:
         return unique_nodes
     
     async def test_nodes(self, nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """批量测试节点"""
+        """批量测试节点（增强稳定性）"""
         if not nodes:
             self.log.warning("没有节点可以测试")
             return []
         
         self.log.info(f"开始测试 {len(nodes)} 个节点...")
         
+        # 根据节点数量动态调整并发数
+        base_concurrency = self.config['test_settings']['concurrency']
+        if len(nodes) > 100:
+            # 大量节点时降低并发数
+            actual_concurrency = max(1, base_concurrency // 2)
+            self.log.info(f"检测到大量节点，降低并发数至 {actual_concurrency} 以提高稳定性")
+        elif len(nodes) < 10:
+            # 少量节点时可以提高并发数
+            actual_concurrency = min(len(nodes), base_concurrency + 1)
+        else:
+            actual_concurrency = base_concurrency
+        
         # 并发测试
-        semaphore = asyncio.Semaphore(self.config['test_settings']['concurrency'])
+        semaphore = asyncio.Semaphore(actual_concurrency)
         
         async def test_with_limit(node: Dict[str, Any], index: int) -> Dict[str, Any]:
             async with semaphore:
-                return await self.tester.test_single_node(node, index)
+                try:
+                    return await self.tester.test_single_node(node, index)
+                except Exception as e:
+                    self.log.error(f"节点测试异常 [{index+1}]: {e}")
+                    return {
+                        'name': node.get('name', 'Unnamed'),
+                        'server': node.get('server', 'N/A'),
+                        'port': node.get('port', 'N/A'),
+                        'type': node.get('type', 'N/A'),
+                        'status': 'failed',
+                        'error': f'Test exception: {str(e)[:100]}',
+                        'http_latency': None,
+                        'download_speed': None
+                    }
         
         # 创建任务
         tasks = [test_with_limit(node, i) for i, node in enumerate(nodes)]
         
-        # 执行测试
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # 执行测试（增加进度显示）
+        results = []
+        completed = 0
         
-        # 处理结果
-        valid_results = []
-        for result in results:
-            if isinstance(result, Exception):
-                self.log.error(f"测试异常: {result}")
-            else:
-                valid_results.append(result)
+        # 分批执行以提高稳定性
+        batch_size = min(20, len(tasks))  # 每批最多20个任务
         
-        return valid_results
+        for i in range(0, len(tasks), batch_size):
+            batch_tasks = tasks[i:i+batch_size]
+            self.log.info(f"正在执行第 {i//batch_size + 1} 批测试（{len(batch_tasks)} 个节点）")
+            
+            try:
+                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                
+                # 处理结果
+                for result in batch_results:
+                    if isinstance(result, Exception):
+                        self.log.error(f"批量测试异常: {result}")
+                        results.append({
+                            'name': 'Unknown',
+                            'server': 'N/A',
+                            'port': 'N/A', 
+                            'type': 'N/A',
+                            'status': 'failed',
+                            'error': f'Batch test exception: {str(result)[:100]}',
+                            'http_latency': None,
+                            'download_speed': None
+                        })
+                    else:
+                        results.append(result)
+                    
+                completed += len(batch_tasks)
+                self.log.info(f"测试进度: {completed}/{len(nodes)} ({completed/len(nodes)*100:.1f}%)")
+                
+                # 批次间隔稍作等待，减少系统负载
+                if i + batch_size < len(tasks):
+                    await asyncio.sleep(1)
+                    
+            except Exception as e:
+                self.log.error(f"批量测试失败: {e}")
+                # 继续处理下一批
+                continue
+        
+        return results
     
     def save_results(self, results: List[Dict[str, Any]]) -> str:
         """保存测试结果"""
@@ -200,13 +297,23 @@ class SubsCheckUbuntu:
         if show_count > 0:
             print(f"\n最佳节点 (按速度排名前{show_count}个):")
             print(f"{'-' * 80}")
-            print(f"{'#':<3} {'Name':<35} {'Speed':<12} {'Latency':<10} {'Server':<20}")
+            print(f"{'#':<3} {'Name':<35} {'Speed':<15} {'Latency':<10} {'Server':<20}")
             print(f"{'-' * 80}")
             
             for i, node in enumerate(success_results[:show_count]):
-                speed = f"{node.get('download_speed', 0):.2f}Mbps" if node.get('download_speed') else "N/A"
+                # 根據速度大小選擇合適的精度顯示
+                if node.get('download_speed'):
+                    speed_val = node.get('download_speed', 0)
+                    if speed_val >= 1:
+                        speed = f"{speed_val:.2f}Mbps"
+                    elif speed_val >= 0.1:
+                        speed = f"{speed_val:.3f}Mbps"
+                    else:
+                        speed = f"{speed_val:.6f}Mbps"
+                else:
+                    speed = "N/A"
                 latency = f"{node.get('http_latency', 0):.0f}ms" if node.get('http_latency') else "N/A"
-                print(f"{i+1:<3} {node['name'][:34]:<35} {speed:<12} {latency:<10} {node['server']:<20}")
+                print(f"{i+1:<3} {node['name'][:34]:<35} {speed:<15} {latency:<10} {node['server']:<20}")
     
     async def run(self, subscription_file: str):
         """主运行流程"""
@@ -250,11 +357,13 @@ class SubsCheckUbuntu:
         unique_nodes = self.deduplicate_nodes(all_nodes)
         self.log.info(f"去重后共 {len(unique_nodes)} 个节点")
         
-        # 限制测试数量
-        max_test_nodes = self.config['test_settings']['max_test_nodes']
-        if len(unique_nodes) > max_test_nodes:
+        # 限制测试数量（如果配置了的话）
+        max_test_nodes = self.config.get('test_settings', {}).get('max_test_nodes')
+        if max_test_nodes and max_test_nodes > 0 and len(unique_nodes) > max_test_nodes:
             unique_nodes = unique_nodes[:max_test_nodes]
             self.log.info(f"限制测试节点数量为 {max_test_nodes}")
+        else:
+            self.log.info(f"将测试所有 {len(unique_nodes)} 个节点（未设置节点数量限制）")
         
         try:
             # 测试节点

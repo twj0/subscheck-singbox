@@ -1,85 +1,76 @@
-# Python-generated files
+# SubsCheck-Ubuntu .gitignore
+
+# Python
 __pycache__/
-*.py[oc]
+*.py[cod]
+*$py.class
+*.so
+.Python
 build/
+develop-eggs/
 dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
 wheels/
-*.egg-info
+*.egg-info/
+.installed.cfg
+*.egg
 
 # Virtual environments
 .venv/
+.env/
 venv/
 env/
-
-# UV package manager
-.uv-cache/
-
-# Project specific results and logs
-results/*.json
-results/*.log
-*.log
-sing-box.log
-
-# Binary files
-sing-box-*/
-subs-check
-subs-check.exe
-
-# Configuration and test files
-config_*.yaml
-subscription_*test*.txt
-subscription_*debug*.txt
-
-# Development and debugging
-debug/
-temp/
-tmp/
-
-# OS specific
-.DS_Store
-Thumbs.db
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+debug/
+results/
+logs/
+*.log
+
+# Binaries (will be downloaded by install script)
+sing-box
+sing-box.exe
+uv
+uv.exe
+
+# Windows specific artifacts  
+sing-box-*-windows-*/
+*.bat
 
 # Temporary files
 *.tmp
 *.temp
-tmpl/SubsCheck-Win-GUI/.gitattributes
-tmpl/SubsCheck-Win-GUI/.gitignore
-tmpl/SubsCheck-Win-GUI/about.cs
-tmpl/SubsCheck-Win-GUI/about.Designer.cs
-tmpl/SubsCheck-Win-GUI/about.resx
-tmpl/SubsCheck-Win-GUI/App.config
-tmpl/SubsCheck-Win-GUI/CheckUpdates.cs
-tmpl/SubsCheck-Win-GUI/CheckUpdates.Designer.cs
-tmpl/SubsCheck-Win-GUI/CheckUpdates.resx
-tmpl/SubsCheck-Win-GUI/EditURLs.cs
-tmpl/SubsCheck-Win-GUI/EditURLs.Designer.cs
-tmpl/SubsCheck-Win-GUI/EditURLs.resx
-tmpl/SubsCheck-Win-GUI/favicon.ico
-tmpl/SubsCheck-Win-GUI/Form1.cs
-tmpl/SubsCheck-Win-GUI/Form1.Designer.cs
-tmpl/SubsCheck-Win-GUI/Form1.resx
-tmpl/SubsCheck-Win-GUI/going.ico
-tmpl/SubsCheck-Win-GUI/gui.png
-tmpl/SubsCheck-Win-GUI/LICENSE.txt
-tmpl/SubsCheck-Win-GUI/MoreYAML.cs
-tmpl/SubsCheck-Win-GUI/MoreYAML.Designer.cs
-tmpl/SubsCheck-Win-GUI/MoreYAML.resx
-tmpl/SubsCheck-Win-GUI/packages.config
-tmpl/SubsCheck-Win-GUI/Program.cs
-tmpl/SubsCheck-Win-GUI/README.md
-tmpl/SubsCheck-Win-GUI/subs-check.win.gui.csproj
-tmpl/SubsCheck-Win-GUI/subs-check.win.gui.sln
-tmpl/SubsCheck-Win-GUI/Properties/AssemblyInfo.cs
-tmpl/SubsCheck-Win-GUI/Properties/Resources.Designer.cs
-tmpl/SubsCheck-Win-GUI/Properties/Resources.resx
-tmpl/SubsCheck-Win-GUI/Properties/Settings.Designer.cs
-tmpl/SubsCheck-Win-GUI/Properties/Settings.settings
-prompt/gemini_1.md
-prompt/gemini_2.md
-prompt/gemini_3.md
+temp/
+
+# Subscription files (user specific)
+subscription.txt
+subscription_backup.txt
+
+# Config backups
+*.bak
+
+# Template directories (not needed for runtime)
+tmpl/
+
+# Development docs (keep main docs)
+prompt/
+project_linux_compatibility.md
+download_binaries.sh

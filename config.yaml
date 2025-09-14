@@ -4,24 +4,38 @@
 
 # 基本设置
 test_settings:
-  max_test_nodes: 20        # 减少测试节点数量以提高成功率
-  concurrency: 3            # 降低并发数避免资源冲突
-  timeout: 15               # 增加超时时间
+  max_test_nodes: 15        # 测试节点数量限制（设置为 null 或注释掉可无限测试）
+  # max_test_nodes: null    # 取消注释此行即可无限测试所有节点
+  concurrency: 2            # 降低并发数以避免资源冲突
+  timeout: 20               # 增加超时时间
   
-  # 延迟测试URLs - 使用更可靠的测试地址
+  # 延迟测试URLs - 使用更稳定和可靠的测试地址
   latency_urls:
-    - "http://www.gstatic.com/generate_204"  # Google连通性测试
+    - "http://www.gstatic.com/generate_204"  # Google连通性测试（最可靠）
     - "http://cp.cloudflare.com/generate_204"  # Cloudflare连通性测试
+    - "http://httpbin.org/status/200"  # HTTPBin状态测试
     - "http://detectportal.firefox.com/success.txt"  # Firefox连通性测试
   
-  # 速度测试设置 - 使用海外测试文件通过代理访问
-  speed_urls:  # 支持多个备用URL（海外地址，测试翻墙效果）
-    - "http://cachefly.cachefly.net/10mb.test"  # 主要测试URL
-    - "http://speedtest.wdc01.softlayer.com/downloads/test10.zip"
-    - "http://lg.lax.linode.com/10MB-newark.bin"
-    - "http://speedtest.tele2.net/10MB.zip"  # 备用URL
-  speed_url: "http://cachefly.cachefly.net/10mb.test"  # 主要测试URL（向后兼容）
-  speed_test_duration: 10    # 增加测试时间以获得更准确的结果
+  # 速度测试设置 - 使用多个备用测试文件
+  speed_urls:  # 按可靠性排序的测试URL列表
+    - "http://speedtest.wdc01.softlayer.com/downloads/test10.zip"  # IBM Cloud
+    - "http://cachefly.cachefly.net/10mb.test"  # CacheFly CDN  
+    - "http://lg.lax.linode.com/10MB-newark.bin"  # Linode
+    - "http://speedtest.tele2.net/10MB.zip"  # Tele2
+    - "http://mirror.internode.on.net/pub/test/10meg.test"  # Internode
+  speed_url: "http://speedtest.wdc01.softlayer.com/downloads/test10.zip"  # 主要测试URL（向后兼容）
+  speed_test_duration: 8    # 适中的测试时间
+
+# 网络设置优化
+network:
+  dns_servers:             # DNS服务器列表
+    - "223.5.5.5"          # 阿里DNS（国内优先）
+    - "114.114.114.114"     # 114DNS（备用）
+    - "8.8.8.8"            # Google DNS
+    - "1.1.1.1"            # Cloudflare DNS
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  retry_count: 3           # 网络请求重试次数
+  retry_delay: 2           # 重试间隔（秒）
 
 # 定时任务配置
 scheduler:
@@ -36,10 +50,11 @@ test_modes:
   connectivity_test: true   # HTTP连通性测试
   speed_test: true         # 下载速度测试
   tcp_ping: false          # TCP端口连通测试(轻量模式)
+  direct_protocol_test: true # 启用直接协议测试
 
 # 输出和结果设置
 output:
-  show_top_nodes: 20       # 显示前N个最佳节点
+  show_top_nodes: 15       # 显示前N个最佳节点
   save_all_results: true   # 保存完整结果
   results_dir: "results"   # 结果保存目录
   
@@ -47,16 +62,11 @@ output:
 vps_optimization:
   enable: true             # 启用VPS优化
   memory_limit: true       # 内存使用限制
+  low_memory_mode: true    # 低内存模式
   
-# 网络设置  
-network:
-  dns_servers:             # DNS服务器列表
-    - "223.5.5.5"          # 阿里DNS
-    - "8.8.8.8"            # Google DNS
-  user_agent: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:91.0) Gecko/20100101 Firefox/91.0"
-
 # 日志设置
 logging:
   level: "INFO"            # 日志级别: DEBUG, INFO, WARNING, ERROR
   save_logs: true          # 保存日志到文件
   log_file: "logs/subscheck.log"
+  debug_mode: false        # 调试模式
