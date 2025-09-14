@@ -227,9 +227,12 @@ class singboxRunner:
                 log.debug(f"跳过VLESS不支持的网络类型 {network}，使用TCP")
                 
             if node.get('security') == 'tls' or node.get('tls'):
+                sni = node.get('sni', node['server'])
+                if isinstance(sni, list):
+                    sni = sni if sni else node['server']
                 outbound["tls"] = {
                     "enabled": True,
-                    "server_name": node.get('sni', node['server']),
+                    "server_name": sni,
                     "insecure": True
                 }
 
@@ -265,9 +268,12 @@ class singboxRunner:
                 # 不添加transport字段，默认使用TCP
                 
             if node.get('tls'):
+                sni = node.get('sni', node['server'])
+                if isinstance(sni, list):
+                    sni = sni if sni else node['server']
                 outbound["tls"] = {
                     "enabled": True,
-                    "server_name": node.get('sni', node['server']),
+                    "server_name": sni,
                     "insecure": True
                 }
 
@@ -275,9 +281,12 @@ class singboxRunner:
             outbound["server"] = node['server']
             outbound["server_port"] = int(node['port'])  # 确保端口是整数
             outbound["password"] = node['password']
+            sni = node.get('sni', node['server'])
+            if isinstance(sni, list):
+                sni = sni if sni else node['server']
             outbound["tls"] = {
                 "enabled": True,
-                "server_name": node.get('sni', node['server']),
+                "server_name": sni,
                 "insecure": True
             }
         
