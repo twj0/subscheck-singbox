@@ -6,7 +6,8 @@
 test_settings:
   max_test_nodes: 15        # 测试节点数量限制（设置为 null 或注释掉可无限测试）
   # max_test_nodes: null    # 取消注释此行即可无限测试所有节点
-  concurrency: 2            # 降低并发数以避免资源冲突
+  concurrency: 10            # 基础并发数
+  concurrency_auto_adjust: false # 是否启用智能并发调整
   timeout: 20               # 增加超时时间
   
   # 延迟测试URLs - 使用更稳定和可靠的测试地址

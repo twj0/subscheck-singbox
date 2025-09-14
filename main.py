@@ -165,15 +165,21 @@ class SubsCheckUbuntu:
         
         # 根据节点数量动态调整并发数
         base_concurrency = self.config['test_settings']['concurrency']
-        if len(nodes) > 100:
-            # 大量节点时降低并发数
-            actual_concurrency = max(1, base_concurrency // 2)
-            self.log.info(f"检测到大量节点，降低并发数至 {actual_concurrency} 以提高稳定性")
-        elif len(nodes) < 10:
-            # 少量节点时可以提高并发数
-            actual_concurrency = min(len(nodes), base_concurrency + 1)
+        auto_adjust = self.config['test_settings'].get('concurrency_auto_adjust', True)
+
+        if auto_adjust:
+            if len(nodes) > 100:
+                # 大量节点时降低并发数
+                actual_concurrency = max(1, base_concurrency // 2)
+                self.log.info(f"检测到大量节点，智能调整并发数至 {actual_concurrency} 以提高稳定性")
+            elif len(nodes) < 10:
+                # 少量节点时可以提高并发数
+                actual_concurrency = min(len(nodes), base_concurrency + 1)
+            else:
+                actual_concurrency = base_concurrency
         else:
             actual_concurrency = base_concurrency
+            self.log.info(f"智能并发调整已禁用，使用固定并发数: {actual_concurrency}")
         
         # 并发测试
         semaphore = asyncio.Semaphore(actual_concurrency)
