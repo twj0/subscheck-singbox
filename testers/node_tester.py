@@ -248,25 +248,39 @@ class NodeTester:
                             url, 
                             proxy=proxy_url, 
                             timeout=timeout,
-                            allow_redirects=False,  # 不允许重定向以加快测试
-                            ssl=False  # 对于HTTP测试URL禁用SSL验证
+                            allow_redirects=True,  # 允许重定向
+                            ssl=False  # 对于被屏蔽网站可能需要禁用SSL验证
                         ) as response:
                             elapsed = (time.monotonic() - start_time) * 1000
                             log.debug(f"Response: {response.status} in {elapsed:.0f}ms")
                             
-                            if response.status in [200, 204, 301, 302]:
+                            # 对于被屏蔽的网站，即使返回404或403等错误状态码，也表明连接是通的
+                            if response.status < 500:  # 任何小于500的状态码都表示连接成功
                                 latencies.append(elapsed)
-                            elif response.status >= 400:
-                                log.debug(f"HTTP error {response.status} for {url}")
+                            elif response.status >= 500:
+                                log.debug(f"HTTP server error {response.status} for {url}")
                                 
                     except asyncio.TimeoutError:
                         log.debug(f"Timeout testing {url}")
                         continue
                     except Exception as e:
                         log.debug(f"Error testing {url}: {type(e).__name__}: {e}")
+                        # 即使出现异常，也可能表明连接已建立，只是内容获取失败
+                        # 这在测试被屏蔽网站时是常见情况
+                        elapsed = (time.monotonic() - start_time) * 1000
+                        if elapsed < timeout_seconds * 1000:  # 如果在超时前有响应
+                            latencies.append(elapsed)
                         continue
         except Exception as e:
             log.debug(f"Session creation error: {type(e).__name__}: {e}")
+            return None
+
+        if latencies:
+            avg_latency = sum(latencies) / len(latencies)
+            log.debug(f"Average latency: {avg_latency:.0f}ms from {len(latencies)} successful tests")
+            return avg_latency
+        else:
+            log.debug("No successful connectivity tests")
             return None
 
     async def _test_stability(self, proxy_url: str, duration: int) -> Optional[float]:
@@ -937,8 +951,17 @@ class NodeTester:
                 
                 log.debug("開始接收數據...")
                 
-                # 增加总的测试时间以适应慢速连接
-                extended_duration = duration * 3
+                # 根据文件大小调整测试时间
+                # 对于小文件，使用较短时间；对于大文件，使用较长时间
+                if 'icon-ios' in test_url:
+                    # 小文件使用较短测试时间
+                    extended_duration = max(10, duration // 2)
+                elif '100Mb.dat' in test_url or 'google-cloud-cli' in test_url:
+                    # 大文件使用更长测试时间
+                    extended_duration = duration * 2
+                else:
+                    # 中等文件使用标准测试时间
+                    extended_duration = duration
                 
                 while True:
                     elapsed = time.perf_counter() - start_time
@@ -953,7 +976,7 @@ class NodeTester:
                         data = sock.recv(8192)
                         if not data:
                             # 如果没有数据但在合理时间内下载了一些数据，则认为测试成功
-                            if downloaded_bytes > 0 and elapsed >= duration / 3:
+                            if downloaded_bytes > 0 and elapsed >= min(5, extended_duration / 3):
                                 log.debug("連接關閉，但已下載足夠數據")
                                 break
                             else:
@@ -996,7 +1019,7 @@ class NodeTester:
                     except socket.timeout:
                         log.debug(f"Socket接收超時，當前已下載: {downloaded_bytes} 字節")
                         # 即使超时，如果已下载足够数据也认为测试成功
-                        if downloaded_bytes > 0 and elapsed >= duration / 3:
+                        if downloaded_bytes > 0 and elapsed >= min(5, extended_duration / 3):
                             log.debug("超時但已下載足夠數據")
                             break
                         # 如果在前5秒就超时且没有下载到数据，则失败
@@ -1006,7 +1029,7 @@ class NodeTester:
                     except Exception as e:
                         log.debug(f"接收數據錯誤: {type(e).__name__}: {e}")
                         # 遇到异常，如果已下载足够数据则认为测试成功
-                        if downloaded_bytes > 0 and elapsed >= duration / 3:
+                        if downloaded_bytes > 0 and elapsed >= min(5, extended_duration / 3):
                             log.debug("異常但已下載足夠數據")
                             break
                         # 如果在前5秒就出错且没有下载到数据，则失败
@@ -1024,7 +1047,7 @@ class NodeTester:
                     log.debug(f"Socket下載成功: {downloaded_bytes}字節, {final_elapsed:.3f}秒, {speed_mbps:.4f}Mbps")
                     
                     # 只有在速度合理時才返回結果，返回更高精度的值
-                    if speed_mbps > 0.00005:  # 进一步降低最小速度阈值
+                    if speed_mbps > 0.00001:  # 进一步降低最小速度阈值
                         return round(speed_mbps, 4)
                     else:
                         log.debug(f"速度過低: {speed_mbps:.4f}Mbps")

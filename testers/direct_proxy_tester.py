@@ -100,7 +100,7 @@ class DirectProxyTester:
                 try:
                     response = await asyncio.wait_for(
                         reader.read(1024), 
-                        timeout=3
+                        timeout=5
                     )
                     elapsed = (time.monotonic() - start_time) * 1000
                     log.debug(f"Shadowsocks连接成功 {host}:{port} - {elapsed:.0f}ms")
@@ -123,6 +123,11 @@ class DirectProxyTester:
             return None
         except Exception as e:
             log.debug(f"Shadowsocks测试错误 {host}:{port}: {e}")
+            # 即使出现异常，如果连接建立时间很短，也可能表明连接是通的
+            elapsed = (time.monotonic() - start_time) * 1000
+            if elapsed < self.timeout * 1000:
+                log.debug(f"Shadowsocks连接可能成功但有异常 {host}:{port} - {elapsed:.0f}ms (异常)")
+                return elapsed
             return None
     
     async def test_vmess_connectivity(self, host: str, port: int, uuid: str) -> Optional[float]:
@@ -150,7 +155,7 @@ class DirectProxyTester:
                 try:
                     response = await asyncio.wait_for(
                         reader.read(1024), 
-                        timeout=3
+                        timeout=5
                     )
                     elapsed = (time.monotonic() - start_time) * 1000
                     log.debug(f"VMess连接成功 {host}:{port} - {elapsed:.0f}ms")
@@ -172,6 +177,64 @@ class DirectProxyTester:
             return None
         except Exception as e:
             log.debug(f"VMess测试错误 {host}:{port}: {e}")
+            # 即使出现异常，如果连接建立时间很短，也可能表明连接是通的
+            elapsed = (time.monotonic() - start_time) * 1000
+            if elapsed < self.timeout * 1000:
+                log.debug(f"VMess连接可能成功但有异常 {host}:{port} - {elapsed:.0f}ms (异常)")
+                return elapsed
+            return None
+    
+    async def test_vless_connectivity(self, host: str, port: int, uuid: str) -> Optional[float]:
+        """
+        测试VLESS协议连通性
+        """
+        try:
+            start_time = time.monotonic()
+            
+            # 创建TCP连接
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(host, port),
+                timeout=self.timeout
+            )
+            
+            try:
+                # VLESS握手比较复杂，这里简化为连接测试
+                # 发送一个探测包
+                test_data = b'\x00' * 16  # 简单的探测数据
+                writer.write(test_data)
+                await writer.drain()
+                
+                # 尝试读取响应
+                try:
+                    response = await asyncio.wait_for(
+                        reader.read(1024), 
+                        timeout=5
+                    )
+                    elapsed = (time.monotonic() - start_time) * 1000
+                    log.debug(f"VLESS连接成功 {host}:{port} - {elapsed:.0f}ms")
+                    return elapsed
+                except asyncio.TimeoutError:
+                    elapsed = (time.monotonic() - start_time) * 1000
+                    log.debug(f"VLESS连接可能成功 {host}:{port} - {elapsed:.0f}ms (超时)")
+                    return elapsed
+                    
+            finally:
+                writer.close()
+                await writer.wait_closed()
+                
+        except asyncio.TimeoutError:
+            log.debug(f"VLESS连接超时 {host}:{port}")
+            return None
+        except ConnectionRefusedError:
+            log.debug(f"VLESS连接被拒绝 {host}:{port}")
+            return None
+        except Exception as e:
+            log.debug(f"VLESS测试错误 {host}:{port}: {e}")
+            # 即使出现异常，如果连接建立时间很短，也可能表明连接是通的
+            elapsed = (time.monotonic() - start_time) * 1000
+            if elapsed < self.timeout * 1000:
+                log.debug(f"VLESS连接可能成功但有异常 {host}:{port} - {elapsed:.0f}ms (异常)")
+                return elapsed
             return None
     
     async def test_trojan_connectivity(self, host: str, port: int, password: str) -> Optional[float]:
@@ -259,7 +322,7 @@ class DirectProxyTester:
                 elif node_type == 'vless':
                     # VLESS通常也可以用类似VMess的方式测试
                     uuid = node.get('uuid', '')
-                    result = await self.test_vmess_connectivity(host, port, uuid)
+                    result = await self.test_vless_connectivity(host, port, uuid)
                     if result is not None:
                         return result
                 

@@ -10,23 +10,23 @@ test_settings:
   concurrency_auto_adjust: false  # 启用智能并发调整
   timeout: 20               # 增加超时时间
   
-  # 延迟测试URLs - 使用更稳定和可靠的测试地址
+  # 延迟测试URLs - 使用被GFW屏蔽的网站以测试真实连接质量
   latency_urls:
-    - "http://www.gstatic.com/generate_204"  # Google连通性测试（最可靠）
-    - "http://cp.cloudflare.com/generate_204"  # Cloudflare连通性测试
-    - "http://httpbin.org/status/200"  # HTTPBin状态测试
-    - "http://detectportal.firefox.com/success.txt"  # Firefox连通性测试
+    - "https://www.google.com"  # Google主页
+    - "https://www.youtube.com"  # YouTube
+    - "https://www.twitter.com"  # Twitter
+    - "https://www.facebook.com"  # Facebook
   
-  # 速度测试设置 - 使用多个备用测试文件
-  speed_urls:  # 按可靠性排序的测试URL列表
-    - "http://speedtest.wdc01.softlayer.com/downloads/test10.zip"  # IBM Cloud
-    - "http://cachefly.cachefly.net/10mb.test"  # CacheFly CDN  
-    - "http://lg.lax.linode.com/10MB-newark.bin"  # Linode
-    - "http://speedtest.tele2.net/10MB.zip"  # Tele2
-    - "http://mirror.internode.on.net/pub/test/10meg.test"  # Internode
-  speed_url: "http://speedtest.wdc01.softlayer.com/downloads/test10.zip"  # 主要测试URL（向后兼容）
-  speed_test_duration: 15    # 增加测试时间以提高精度
-  speed_test_repeats: 2      # 重复测试次数以提高准确性
+  # 速度测试设置 - 使用多种大小的文件进行精密测量
+  speed_urls:  # 按文件大小排序的测试URL列表
+    - "https://abs.twimg.com/responsive-web/client-web/icon-ios.b1fc727a.png"  # 小文件 (Twitter图标)
+    - "https://noto-website-2.storage.googleapis.com/pkgs/NotoSans-unhinted.zip"  # 1.1MB文件
+    - "https://storage.googleapis.com/chrome-for-testing-public/128.0.6613.0/win64/chromedriver-win64.zip"  # 8MB文件
+    - "https://vin.proof.ovh.us/files/100Mb.dat"  # 100MB文件 (美国东部)
+    - "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-483.0.0-windows-x86_64.zip"  # 44MB文件
+  speed_url: "https://abs.twimg.com/responsive-web/client-web/icon-ios.b1fc727a.png"  # 主要测试URL（向后兼容）
+  speed_test_duration: 20    # 增加测试时间以提高精度
+  speed_test_repeats: 3      # 重复测试次数以提高准确性
   stability_test_enabled: true  # 启用稳定性测试
 
 # 网络设置优化
