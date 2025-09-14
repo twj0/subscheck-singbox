@@ -82,6 +82,14 @@ class singboxRunner:
             available_paths = [str(p) for p in possible_paths]
             raise RuntimeError(f"sing-box可执行文件未找到。查找过的路径: {available_paths}")
         
+        # 强制添加执行权限 (解决 permission denied 问题)
+        if os.name != 'nt':
+            try:
+                os.chmod(singbox_path, 0o755)
+                log.debug(f"已为 {singbox_path} 添加执行权限")
+            except Exception as e:
+                log.warning(f"添加执行权限失败: {e}")
+
         # 检查配置文件内容
         log.debug(f"sing-box配置文件: {self._config_file_path}")
         log.debug(f"sing-box配置内容: {json.dumps(self._config, indent=2)}")
@@ -144,7 +152,7 @@ class singboxRunner:
             
             raise RuntimeError(f"sing-box启动失败。返回代码: {self._process.returncode}。错误: {stderr_output[:300]}...")
 
-        log.debug(f"sing-box进程启动成功，PID: {self._process.pid}，端口: {self._config['inbounds'][0]['listen_port']}")
+        log.debug(f"sing-box进程启动成功，PID: {self._process.pid}，端口: {self._config['inbounds']['listen_port']}")
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

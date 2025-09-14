@@ -8,6 +8,7 @@ from typing import Dict, Optional, List, Any
 from core.singbox_runner import singboxRunner
 from testers.direct_proxy_tester import DirectProxyTester
 from utils.logger import log
+from utils.ip_checker import IPChecker
 
 class NodeTester:
     """Tests a single proxy node using singbox."""
@@ -23,6 +24,7 @@ class NodeTester:
         
         # 初始化直接代理测试器
         self.direct_tester = DirectProxyTester(timeout=config.get('test_settings', {}).get('timeout', 15))
+        self.ip_checker = IPChecker(config)
     
     async def cleanup(self):
         """Clean up any remaining processes."""
@@ -84,7 +86,8 @@ class NodeTester:
             'status': 'failed',
             'error': None,
             'http_latency': None,
-            'download_speed': None
+            'download_speed': None,
+            'ip_purity': None
         }
 
         log.info(f"Testing [{index + 1: >3}] {result['name']}")
@@ -144,6 +147,12 @@ class NodeTester:
                     # 4. 只有在连接测试成功时才进行速度测试
                     download_speed = None
                     if best_latency is not None:
+                        # 5. 进行IP纯净度测试
+                        ip_purity = await self.ip_checker.check_ip_purity(proxy_url)
+                        result['ip_purity'] = ip_purity
+                        if ip_purity:
+                            log.info(f"  - IP类型: {ip_purity}")
+
                         log.debug(f"开始速度测试...使用代理: {proxy_url}")
                         
                         # 确保sing-box已经完全启动并可用

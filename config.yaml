@@ -4,7 +4,7 @@
 
 # 基本设置
 test_settings:
-  max_test_nodes: 15        # 测试节点数量限制（设置为 null 或注释掉可无限测试）
+  max_test_nodes: 114        # 测试节点数量限制（设置为 null 或注释掉可无限测试）
   # max_test_nodes: null    # 取消注释此行即可无限测试所有节点
   concurrency: 10            # 基础并发数
   concurrency_auto_adjust: false # 是否启用智能并发调整
@@ -112,3 +112,8 @@ upload_settings:
     password: "${WEBDAV_PASSWORD}"
     root: "/"
     remote_path: "subscheck_results.json"
+
+# IP纯净度查询设置
+ip_purity_check:
+  enabled: true  # 是否启用IP纯净度查询
+  api_token: "${IP_PURITY_API_TOKEN}" # 从 .env 文件读取 findip.net API Token

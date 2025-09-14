@@ -306,8 +306,8 @@ class SubsCheckUbuntu:
         if show_count > 0:
             print(f"\n最佳节点 (按速度排名前{show_count}个):")
             print(f"{'-' * 80}")
-            print(f"{'#':<3} {'Name':<35} {'Speed':<15} {'Latency':<10} {'Server':<20}")
-            print(f"{'-' * 80}")
+            print(f"{'#':<3} {'Name':<30} {'Speed':<15} {'Latency':<10} {'IP Purity':<15} {'Server':<20}")
+            print(f"{'-' * 95}")
             
             for i, node in enumerate(success_results[:show_count]):
                 # 根據速度大小選擇合適的精度顯示
@@ -322,7 +322,8 @@ class SubsCheckUbuntu:
                 else:
                     speed = "N/A"
                 latency = f"{node.get('http_latency', 0):.0f}ms" if node.get('http_latency') else "N/A"
-                print(f"{i+1:<3} {node['name'][:34]:<35} {speed:<15} {latency:<10} {node['server']:<20}")
+                ip_purity = node.get('ip_purity', 'N/A') or "N/A"
+                print(f"{i+1:<3} {node['name'][:29]:<30} {speed:<15} {latency:<10} {ip_purity:<15} {node['server']:<20}")
     
     async def run(self, subscription_file: str):
         """主运行流程"""
