@@ -43,7 +43,7 @@ def parse_node_url(url: str) -> Optional[Dict[str, Any]]:
         else:
             # 检查是否是其他格式
             if '://' in url:
-                protocol = url.split('://')[0]
+                protocol = url.split('://')
                 log.debug(f"Unsupported protocol '{protocol}': {url[:30]}...")
             else:
                 log.debug(f"Invalid URL format: {url[:30]}...")
@@ -63,7 +63,7 @@ def _parse_vless(url: str) -> Dict[str, Any]:
         return None
     
     # 获取网络类型和相关参数
-    network = params.get('type', ['tcp'])[0]
+    network = params.get('type', ['tcp'])
     
     node_data = {
         'name': urllib.parse.unquote(parsed_url.fragment) if parsed_url.fragment else f"{parsed_url.hostname}:{port}",
@@ -71,20 +71,21 @@ def _parse_vless(url: str) -> Dict[str, Any]:
         'server': parsed_url.hostname,
         'port': int(port),
         'uuid': parsed_url.username,
-        'security': params.get('security', ['none'])[0],
-        'sni': params.get('sni', [parsed_url.hostname])[0],
-        'network': network
+        'security': params.get('security', ['none']),
+        'sni': params.get('sni', [parsed_url.hostname]),
+        'network': network,
+        'original_url': url
     }
     
     # 添加网络类型相关参数
     if network in ['ws', 'websocket']:
-        node_data['path'] = params.get('path', ['/'])[0]
-        node_data['headers'] = params.get('host', [''])[0]
+        node_data['path'] = params.get('path', ['/'])
+        node_data['headers'] = params.get('host', [''])
     elif network == 'grpc':
-        node_data['serviceName'] = params.get('serviceName', params.get('grpc-service-name', ['']))[0]
+        node_data['serviceName'] = params.get('serviceName', params.get('grpc-service-name', ['']))
     elif network in ['h2', 'http']:
-        node_data['path'] = params.get('path', ['/'])[0]
-        node_data['headers'] = params.get('host', [''])[0]
+        node_data['path'] = params.get('path', ['/'])
+        node_data['headers'] = params.get('host', [''])
     
     return node_data
 
@@ -118,7 +119,8 @@ def _parse_vmess(url: str) -> Optional[Dict[str, Any]]:
             'security': config.get('scy', 'auto'),
             'network': network,
             'tls': config.get('tls', '') == 'tls',
-            'sni': config.get('sni', config['add'])
+            'sni': config.get('sni', config['add']),
+            'original_url': url
         }
         
         # 添加网络类型相关参数
@@ -152,7 +154,8 @@ def _parse_trojan(url: str) -> Dict[str, Any]:
         'server': parsed_url.hostname,
         'port': int(port),
         'password': parsed_url.username,
-        'sni': urllib.parse.parse_qs(parsed_url.query).get('sni', [parsed_url.hostname])[0]
+        'sni': urllib.parse.parse_qs(parsed_url.query).get('sni', [parsed_url.hostname]),
+        'original_url': url
     }
 
 def _parse_shadowsocks(url: str) -> Optional[Dict[str, Any]]:
@@ -178,9 +181,9 @@ def _parse_shadowsocks(url: str) -> Optional[Dict[str, Any]]:
                 # 尝试从完整URL中提取
                 url_without_scheme = url[5:]  # Remove 'ss://'
                 if '@' in url_without_scheme:
-                    encoded_part = url_without_scheme.split('@')[0]
+                    encoded_part = url_without_scheme.split('@')
                 elif '#' in url_without_scheme:
-                    encoded_part = url_without_scheme.split('#')[0]
+                    encoded_part = url_without_scheme.split('#')
                 else:
                     encoded_part = url_without_scheme
             
@@ -216,7 +219,8 @@ def _parse_shadowsocks(url: str) -> Optional[Dict[str, Any]]:
             'server': parsed_url.hostname,
             'port': int(port),
             'method': method,
-            'password': password
+            'password': password,
+            'original_url': url
         }
     except Exception as e:
         log.debug(f"Failed to parse Shadowsocks URL: {e}")

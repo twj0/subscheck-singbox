@@ -17,12 +17,15 @@ from pathlib import Path
 from typing import List, Dict, Any
 from datetime import datetime, time as dt_time
 import json
+from dotenv import load_dotenv
 
 # 导入项目模块
 from utils.logger import setup_logger, get_logger, log_pwsh_command
 from parsers.base_parser import parse_node_url
 from parsers.clash_parser import parse_clash_config
 from testers.node_tester import NodeTester
+from utils.subscription_backup import SubscriptionBackup
+from utils.uploader import ResultUploader
 
 class SubsCheckUbuntu:
     """
@@ -382,13 +385,27 @@ class SubsCheckUbuntu:
             
             self.log.info(f"\n测试完成! 耗时: {duration:.1f}s, 成功: {success_count}/{len(results)}")
             
+            # 上传测试结果
+            if self.config.get('upload_settings', {}).get('enabled', False):
+                self.log.info("开始上传测试结果...")
+                result_uploader = ResultUploader(self.config)
+                await result_uploader.upload_results(results, len(unique_nodes))
+
+            # 备份订阅
+            if self.config.get('subscription_backup', {}).get('enabled', False):
+                self.log.info("开始备份成功的节点...")
+                backup_module = SubscriptionBackup(self.config)
+                successful_nodes = [r for r in results if r['status'] == 'success']
+                await backup_module.backup_subscription(successful_nodes)
+            
         finally:
             # 清理资源
             await self.tester.cleanup()
 
 def load_config(config_file: str = 'config.yaml') -> Dict[str, Any]:
-    """加载配置文件"""
+    """加载配置文件并解析环境变量"""
     from utils.logger import get_logger
+    from utils.config_utils import parse_env_variables
     log = get_logger()
     
     config_path = Path(config_file)
@@ -398,6 +415,9 @@ def load_config(config_file: str = 'config.yaml') -> Dict[str, Any]:
     
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
+        
+    # 解析环境变量
+    config = parse_env_variables(config)
     
     log.info(f"配置加载成功: {config_file}")
     return config
@@ -506,6 +526,9 @@ def start_scheduler(config: Dict[str, Any]):
 
 async def main():
     """主函数"""
+    # 加载 .env 文件
+    load_dotenv()
+    
     parser = argparse.ArgumentParser(
         description="SubsCheck-Ubuntu - 基于Sing-box的代理节点测速工具",
         formatter_class=argparse.RawDescriptionHelpFormatter,

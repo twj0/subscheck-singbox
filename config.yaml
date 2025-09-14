@@ -70,3 +70,44 @@ logging:
   save_logs: true          # 保存日志到文件
   log_file: "logs/subscheck.log"
   debug_mode: false        # 调试模式
+
+# 订阅备份设置
+subscription_backup:
+  enabled: false
+  
+  gist:
+    enabled: false
+    token: "${GIST_TOKEN}"
+    gist_id: "${GIST_ID}"
+    filename: "subscheck_backup.txt"
+    
+  webdav:
+    enabled: false
+    hostname: "${WEBDAV_BACKUP_HOSTNAME}"
+    username: "${WEBDAV_BACKUP_USERNAME}"
+    password: "${WEBDAV_BACKUP_PASSWORD}"
+    root: "/"
+    remote_path: "subscheck_backup.txt"
+
+# 结果上传设置
+upload_settings:
+  enabled: false
+  type: "gist"  # 可选: local, gist, webhook, webdav, r2
+  
+  gist:
+    enabled: false
+    token: "${GIST_TOKEN}"
+    public: false
+    
+  webhook:
+    enabled: false
+    url: ""
+    headers: {}
+
+  webdav:
+    enabled: false
+    hostname: "${WEBDAV_HOSTNAME}"
+    username: "${WEBDAV_USERNAME}"
+    password: "${WEBDAV_PASSWORD}"
+    root: "/"
+    remote_path: "subscheck_results.json"

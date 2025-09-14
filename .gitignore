@@ -74,3 +74,4 @@ tmpl/
 prompt/
 project_linux_compatibility.md
 download_binaries.sh
+.env

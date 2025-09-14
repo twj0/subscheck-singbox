@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import base64
 from datetime import datetime
+from webdav3.client import Client as WebDAVClient
 
 from utils.logger import log
 
@@ -40,6 +41,8 @@ class ResultUploader:
                 await self._upload_to_webhook(summary, results)
             elif upload_type == 'r2':
                 await self._upload_to_r2(summary, results)
+            elif upload_type == 'webdav':
+                await self._upload_to_webdav(summary, results)
             else:
                 self._save_local(summary, results)
                 
@@ -136,6 +139,35 @@ class ResultUploader:
         """上传到Cloudflare R2 (简化实现)"""
         # 注：完整的R2上传需要AWS S3兼容的SDK
         log.info("R2上传功能需要配置AWS S3兼容客户端")
+
+    async def _upload_to_webdav(self, summary: Dict, results: list):
+        """上传到 WebDAV"""
+        webdav_config = self.upload_config.get('webdav', {})
+        options = {
+            'webdav_hostname': webdav_config.get('hostname'),
+            'webdav_login': webdav_config.get('username'),
+            'webdav_password': webdav_config.get('password'),
+            'webdav_root': webdav_config.get('root', '/')
+        }
+        
+        remote_path = webdav_config.get('remote_path', 'subscheck_results.json')
+        
+        if not all([options['webdav_hostname'], options['webdav_login'], options['webdav_password']]):
+            log.error("WebDAV 配置不完整 (hostname, username, password)")
+            return
+            
+        try:
+            # 将摘要和结果合并到一个JSON对象中
+            upload_content = json.dumps({
+                'summary': summary,
+                'results': results
+            }, indent=2, ensure_ascii=False)
+
+            client = WebDAVClient(options)
+            client.write_to(upload_content, remote_path)
+            log.info(f"测试结果已成功上传到 WebDAV: {remote_path}")
+        except Exception as e:
+            log.error(f"上传到 WebDAV 时发生异常: {e}")
         
     def _save_local(self, summary: Dict, results: list):
         """本地保存（VPS默认方式）"""
