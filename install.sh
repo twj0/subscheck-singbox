@@ -78,14 +78,26 @@ configure_apt_mirror() {
         UBUNTU_CODENAME=$(lsb_release -cs 2>/dev/null || echo "focal")
         echo "检测到 Ubuntu 版本: $UBUNTU_CODENAME"
         
-        # 优先使用阿里云镜像，备用清华镜像
+        # --- [核心修正] ---
+        # 根据架构选择正确的镜像地址
+        ARCH=$(uname -m)
+        if [[ "$ARCH" == "x86_64" ]]; then
+            MIRROR_URL="http://mirrors.aliyun.com/ubuntu/"
+        else
+            # aarch64, armv7l 等架构使用 ubuntu-ports
+            MIRROR_URL="http://mirrors.aliyun.com/ubuntu-ports/"
+        fi
+        echo "当前架构 $ARCH, 使用镜像地址: $MIRROR_URL"
+        # --- [修正结束] ---
+
+        # 优先使用阿里云镜像
         echo "更新APT源为阿里云镜像..."
         $SUDO_CMD tee /etc/apt/sources.list >/dev/null <<EOF
 # 阿里云 Ubuntu 镜像源 - 由 SubsCheck-Ubuntu 自动配置
-deb http://mirrors.aliyun.com/ubuntu/ $UBUNTU_CODENAME main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $UBUNTU_CODENAME-updates main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $UBUNTU_CODENAME-backports main restricted universe multiverse
-deb http://mirrors.aliyun.com/ubuntu/ $UBUNTU_CODENAME-security main restricted universe multiverse
+deb ${MIRROR_URL} $UBUNTU_CODENAME main restricted universe multiverse
+deb ${MIRROR_URL} $UBUNTU_CODENAME-updates main restricted universe multiverse
+deb ${MIRROR_URL} $UBUNTU_CODENAME-backports main restricted universe multiverse
+deb ${MIRROR_URL} $UBUNTU_CODENAME-security main restricted universe multiverse
 EOF
         echo -e "${GREEN}✅ APT源已更新为阿里云镜像${NC}"
     else
@@ -93,7 +105,10 @@ EOF
     fi
     
     echo "更新软件包列表..."
-    $SUDO_CMD apt update -qq
+    if ! $SUDO_CMD apt update; then
+         echo -e "${RED}错误: apt update 失败，请检查网络和镜像源配置。${NC}"
+         exit 1
+    fi
     echo -e "${GREEN}✅ APT更新完成${NC}"
 }
 
