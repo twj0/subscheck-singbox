@@ -13,7 +13,6 @@ SUDO_CMD=""
 detect_environment() {
     echo -e "${GREEN}===============================================${NC}"
     echo -e "${GREEN}    SubsCheck-Ubuntu v1.0 安装程序${NC}"
-    echo -e "${GREEN}    专为Linux环境和中国大陆网络优化${NC}"
     echo -e "${GREEN}===============================================${NC}"
     
     # 检测操作系统
@@ -48,7 +47,7 @@ detect_environment() {
     # 检测网络环境（中国大陆优化）
     echo "检测网络环境..."
     if curl -m 5 -s www.baidu.com >/dev/null 2>&1; then
-        echo -e "${GREEN}✅ 网络连接正常，启用中国大陆镜像加速${NC}"
+        echo -e "${GREEN}✅ 网络连接正常，启用中国大陆镜像${NC}"
         USE_CN_MIRROR=true
     else
         echo -e "${YELLOW}网络连接较慢，将使用国际镜像${NC}"
@@ -199,7 +198,7 @@ install_singbox() {
     GITHUB_MIRRORS=(
         "https://api.github.com"
         "https://ghfast.top/https://api.github.com"
-        "https://ghproxy.com/https://api.github.com"
+        "https://gh-proxy.com/https://api.github.com"
     )
     
     SINGBOX_LATEST_TAG=""
@@ -226,7 +225,7 @@ install_singbox() {
     if [ "$USE_CN_MIRROR" = true ]; then
         DOWNLOAD_MIRRORS=(
             "https://ghfast.top"
-            "https://ghproxy.com" 
+            "https://gh-proxy.com" 
             "https://mirror.ghproxy.com"
             "https://gh.con.sh"
             "https://github.com"
@@ -235,7 +234,7 @@ install_singbox() {
         DOWNLOAD_MIRRORS=(
             "https://github.com"
             "https://ghfast.top"
-            "https://ghproxy.com"
+            "https://gh-proxy.com"
         )
     fi
     
