@@ -15,12 +15,12 @@ class NodeTester:
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
-        self.base_port = 40000  # 使用更高的端口范围避免冲突
+        self.base_port = 41000  # 使用更高的端口范围避免冲突
         self._active_processes = []
         self._used_ports = set()
         self._released_ports = {}  # Track when ports were released
         self._port_lock = asyncio.Lock()
-        self._port_recycle_delay = 5.0  # 增加端口回收延迟
+        self._port_recycle_delay = 8.0  # 增加端口回收延迟到8秒
         
         # 初始化直接代理测试器
         self.direct_tester = DirectProxyTester(timeout=config.get('test_settings', {}).get('timeout', 15))
@@ -73,8 +73,14 @@ class NodeTester:
         async with self._port_lock:
             self._used_ports.discard(port)
             self._released_ports[port] = time.monotonic()
-        # Add a small delay to ensure the port is fully released by the OS
-        await asyncio.sleep(0.5)
+        
+        # Windows下需要更長的等待時間確保端口完全釋放
+        if os.name == 'nt':
+            await asyncio.sleep(2.0)  # Windows下延長等待時間
+        else:
+            await asyncio.sleep(1.0)
+            
+        log.debug(f"端口 {port} 釋放完成")
 
     async def test_single_node(self, node: Dict[str, Any], index: int) -> Dict[str, Any]:
         """Complete test suite for a single node."""
@@ -92,8 +98,10 @@ class NodeTester:
 
         log.info(f"Testing [{index + 1: >3}] {result['name']}")
 
+        socks_port = None
         try:
             socks_port = await self._allocate_port(index)
+            log.debug(f" {result['name']} 分配端口 {socks_port}")
             try:
                 # 增加更长的启动等待时间
                 async with singboxRunner(node, socks_port) as runner:
@@ -182,18 +190,27 @@ class NodeTester:
                             log.info(f"  ✓ {result['name']} - 延迟: {best_latency:.0f}ms ({test_method}) | 速度: 测试失败")
                         else:
                             result['status'] = 'success'
-                            log.info(f"  ✓ {result['name']} - 延迟: {best_latency:.0f}ms ({test_method}) | 速度: {download_speed:.2f}Mbps")
+                            # 显示更高精度的速度值
+                            log.info(f"  ✓ {result['name']} - 延迟: {best_latency:.0f}ms ({test_method}) | 速度: {download_speed:.4f}Mbps")
                     else:
                         result['download_speed'] = None
             finally:
-                await self._release_port(socks_port)
+                if socks_port is not None:
+                    log.debug(f"釋放端口 {socks_port} for 節點 {result['name']}")
+                    await self._release_port(socks_port)
 
         except Exception as e:
             result['error'] = str(e)
             log.warning(f"  ✗ {result['name']} - Test failed with exception: {e}")
             log.debug(f"Exception details: {type(e).__name__}: {e}")
-            if 'socks_port' in locals():
-                await self._release_port(socks_port)
+        finally:
+            # 確保端口一定會被釋放
+            if socks_port is not None:
+                try:
+                    await self._release_port(socks_port)
+                    log.debug(f"最終釋放端口 {socks_port} 完成")
+                except Exception as release_error:
+                    log.debug(f"端口釋放失敗: {release_error}")
 
         return result
 
@@ -251,6 +268,92 @@ class NodeTester:
         except Exception as e:
             log.debug(f"Session creation error: {type(e).__name__}: {e}")
             return None
+
+    async def _test_stability(self, proxy_url: str, duration: int) -> Optional[float]:
+        """
+        测试连接的稳定性，通过分析速度波动来计算稳定性分数
+        分数越高表示越稳定
+        """
+        try:
+            import statistics
+            
+            test_url: str = self.config['test_settings']['speed_url']
+            timeout_seconds: int = self.config['test_settings']['timeout'] + 15
+            
+            # 使用较短的超时时间以快速检测波动
+            timeout = aiohttp.ClientTimeout(
+                total=timeout_seconds,
+                connect=timeout_seconds // 3,
+                sock_read=timeout_seconds // 3
+            )
+            
+            connector = aiohttp.TCPConnector(
+                limit=3,
+                limit_per_host=1,
+                enable_cleanup_closed=True,
+                force_close=True
+            )
+            
+            async with aiohttp.ClientSession(
+                connector=connector,
+                trust_env=False,
+                headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            ) as session:
+                start_time = time.monotonic()
+                downloaded_bytes = 0
+                speed_samples = []  # 收集速度样本
+                
+                async with session.get(test_url, proxy=proxy_url, timeout=timeout) as response:
+                    if response.status != 200:
+                        return None
+                    
+                    last_sample_time = start_time
+                    last_downloaded_bytes = 0
+                    
+                    while True:
+                        try:
+                            chunk = await response.content.read(4096)
+                            if not chunk:
+                                break
+                            
+                            downloaded_bytes += len(chunk)
+                            current_time = time.monotonic()
+                            elapsed_time = current_time - start_time
+                            
+                            # 每0.5秒采样一次速度
+                            if current_time - last_sample_time >= 0.5:
+                                sample_duration = current_time - last_sample_time
+                                sample_bytes = downloaded_bytes - last_downloaded_bytes
+                                
+                                if sample_duration > 0 and sample_bytes > 0:
+                                    sample_speed_bps = (sample_bytes * 8) / sample_duration
+                                    sample_speed_mbps = sample_speed_bps / (1024 * 1024)
+                                    speed_samples.append(sample_speed_mbps)
+                                
+                                last_sample_time = current_time
+                                last_downloaded_bytes = downloaded_bytes
+                            
+                            if elapsed_time >= (duration // 2):  # 稳定性测试时间减半以提高效率
+                                break
+                                
+                        except Exception:
+                            break
+                
+                if len(speed_samples) >= 2:
+                    # 计算速度的标准差，标准差越小越稳定
+                    mean_speed = statistics.mean(speed_samples)
+                    if mean_speed > 0:
+                        std_dev = statistics.stdev(speed_samples)
+                        # 稳定性分数 = 平均速度 / (标准差 + 1) ，加1避免除零
+                        # 这样分数越高表示越稳定且速度快
+                        stability_score = mean_speed / (std_dev + 1)
+                        return stability_score
+                
+                return None
+                
+        except Exception as e:
+            log.debug(f"稳定性测试异常: {type(e).__name__}: {e}")
+            return None
         
         if latencies:
             avg_latency = sum(latencies) / len(latencies)
@@ -264,15 +367,92 @@ class NodeTester:
         """Tests download speed using native protocol through sing-box."""
         duration: int = self.config['test_settings']['speed_test_duration']
         
-        log.debug("开始原生协议速度测试")
+        log.debug("開始原生協議速度測試")
         
-        # 使用原生协议速度测试，而不是HTTP
-        speed_result = await self._test_native_protocol_speed(proxy_url, duration)
-        if speed_result is not None and speed_result > 0.01:
-            log.debug(f"原生协议速度测试成功: {speed_result:.2f}Mbps")
-            return speed_result
+        # 獲取重複測試次數
+        repeats: int = self.config['test_settings'].get('speed_test_repeats', 1)
+        stability_test_enabled: bool = self.config['test_settings'].get('stability_test_enabled', False)
+        
+        # 獲取備用測試URL列表
+        speed_urls = self.config['test_settings'].get('speed_urls', [])
+        if not speed_urls:
+            speed_urls = [self.config['test_settings']['speed_url']]
+        
+        speeds = []
+        stability_scores = []
+        
+        # 尝试多个URL直到有一个成功
+        for test_url in speed_urls:
+            log.debug(f"嘗試測試URL: {test_url}")
+            original_speed_url = self.config['test_settings']['speed_url']
+            self.config['test_settings']['speed_url'] = test_url
+            
+            # 增加URL切换后的等待时间
+            await asyncio.sleep(1)
+            
+            for i in range(repeats):
+                if repeats > 1:
+                    log.debug(f"執行第 {i+1}/{repeats} 輪速度測試")
+                
+                # 增加重试机制
+                retry_count = 3
+                for retry in range(retry_count):
+                    # 使用原生協議速度測試，而不是HTTP
+                    speed_result = await self._test_native_protocol_speed(proxy_url, duration)
+                    if speed_result is not None and speed_result > 0.00005:
+                        speeds.append(speed_result)
+                        log.debug(f"第 {i+1} 輪原生協議速度測試成功: {speed_result:.4f}Mbps (重试 {retry+1}/{retry_count})")
+                        
+                        # 如果啟用了穩定性測試，計算穩定性分數
+                        if stability_test_enabled and repeats > 1:
+                            stability_score = await self._test_stability(proxy_url, duration)
+                            if stability_score is not None:
+                                stability_scores.append(stability_score)
+                                log.debug(f"第 {i+1} 輪穩定性測試分數: {stability_score:.2f}")
+                        break  # 成功一次就足够了
+                    else:
+                        log.debug(f"第 {i+1} 輪原生協議速度測試失敗 (重试 {retry+1}/{retry_count})")
+                        if retry < retry_count - 1:
+                            # 在重试前等待一段时间
+                            await asyncio.sleep(2)
+                        else:
+                            # 所有重试都失败了
+                            log.debug(f"第 {i+1} 輪所有重試都失敗")
+                else:
+                    # 成功完成了一轮测试
+                    pass
+            
+            # 恢复原始speed_url配置
+            self.config['test_settings']['speed_url'] = original_speed_url
+            
+            # 如果当前URL测试成功，就不再尝试其他URL
+            if speeds:
+                log.debug(f"URL {test_url} 測試成功，不再嘗試其他URL")
+                break
+            else:
+                log.debug(f"URL {test_url} 測試失敗，嘗試下一個URL")
+                # 在尝试下一个URL前等待一段时间
+                await asyncio.sleep(3)
+        
+        if speeds:
+            # 計算平均速度
+            avg_speed = sum(speeds) / len(speeds)
+            log.debug(f"平均速度: {avg_speed:.4f}Mbps (基於 {len(speeds)} 次有效測試)")
+            
+            # 如果有穩定性分數，也記錄下來
+            if stability_scores:
+                avg_stability = sum(stability_scores) / len(stability_scores)
+                log.debug(f"平均穩定性分數: {avg_stability:.2f}")
+                # 可以將穩定性信息存儲在結果中，供後續使用
+                
+            # 只有在速度合理時才返回結果，返回更高精度的值
+            if avg_speed > 0.00005:  # 进一步降低最小速度阈值
+                return round(avg_speed, 4)
+            else:
+                log.debug(f"平均速度過低: {avg_speed:.4f}Mbps")
+                return None
         else:
-            log.debug("原生协议速度测试失败")
+            log.debug("所有速度測試輪次都失敗了")
             return None
     
     async def _test_proxy_with_simple_request(self, proxy_url: str) -> bool:
@@ -548,11 +728,11 @@ class NodeTester:
                 if final_elapsed > 0 and downloaded_bytes > 0:
                     speed_bps = (downloaded_bytes * 8) / final_elapsed
                     speed_mbps = speed_bps / (1024 * 1024)
-                    log.debug(f"Socket下载成功: {downloaded_bytes}字节, {final_elapsed:.2f}秒, {speed_mbps:.2f}Mbps")
+                    log.debug(f"Socket下载成功: {downloaded_bytes}字节, {final_elapsed:.2f}秒, {speed_mbps:.4f}Mbps")
                     
-                    # 只有在速度合理时才返回结果
-                    if speed_mbps > 0.01:  # 最小速度阈值
-                        return round(speed_mbps, 2)
+                    # 只有在速度合理时才返回结果，返回更高精度的值
+                    if speed_mbps > 0.001:  # 降低最小速度阈值
+                        return round(speed_mbps, 4)
                     else:
                         log.debug(f"速度过低: {speed_mbps:.4f}Mbps")
                         return None
@@ -584,7 +764,7 @@ class NodeTester:
                 trust_env=False,
                 headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
             ) as session:
-                start_time = time.monotonic()
+                start_time = time.perf_counter()  # 使用更高精度的计时器
                 downloaded_bytes = 0
                 
                 log.debug(f"发起下载请求: GET {test_url}")
@@ -604,21 +784,28 @@ class NodeTester:
                     chunk_count = 0
                     last_log_time = start_time
                     
+                    # 记录开始时间
+                    first_byte_time = None
+                    
                     while True:
                         try:
                             chunk = await response.content.read(8192)
                             if not chunk:
                                 break
                             
+                            # 记录接收到第一个字节的时间
+                            if first_byte_time is None:
+                                first_byte_time = time.perf_counter()
+                            
                             downloaded_bytes += len(chunk)
                             chunk_count += 1
-                            elapsed_time = time.monotonic() - start_time
+                            elapsed_time = time.perf_counter() - start_time
                             
-                            # 每2秒记录一次进度
-                            current_time = time.monotonic()
-                            if current_time - last_log_time >= 2.0:
+                            # 每1秒记录一次进度
+                            current_time = time.perf_counter()
+                            if current_time - last_log_time >= 1.0:
                                 current_speed = (downloaded_bytes * 8) / elapsed_time / (1024 * 1024)
-                                log.debug(f"下载进度: {downloaded_bytes/1024:.1f}KB, 当前速度: {current_speed:.2f}Mbps")
+                                log.debug(f"下载进度: {downloaded_bytes/1024:.1f}KB, 当前速度: {current_speed:.4f}Mbps")
                                 last_log_time = current_time
                             
                             if elapsed_time >= duration:
@@ -632,16 +819,23 @@ class NodeTester:
                             log.debug(f"读取数据错误: {type(e).__name__}: {e}")
                             break
                 
-                final_elapsed_time = time.monotonic() - start_time
-                log.debug(f"下载完成: {downloaded_bytes}字节，耗时: {final_elapsed_time:.2f}秒")
+                final_elapsed_time = time.perf_counter() - start_time
+                log.debug(f"下载完成: {downloaded_bytes}字节，耗时: {final_elapsed_time:.3f}秒")
                 
                 if final_elapsed_time > 0 and downloaded_bytes > 0:
-                    speed_bps = (downloaded_bytes * 8) / final_elapsed_time
+                    # 计算考虑连接建立时间的精确速度
+                    effective_time = final_elapsed_time
+                    if first_byte_time is not None:
+                        # 从接收到第一个字节开始计算时间，排除连接建立时间
+                        effective_time = time.perf_counter() - first_byte_time + 0.1  # 添加少量缓冲时间
+                    
+                    speed_bps = (downloaded_bytes * 8) / effective_time
                     speed_mbps = speed_bps / (1024 * 1024)
-                    log.debug(f"计算速度: {speed_mbps:.2f}Mbps")
-                    return round(speed_mbps, 2)
+                    log.debug(f"计算速度: {speed_mbps:.4f}Mbps (基于{effective_time:.3f}秒有效时间)")
+                    # 返回更高精度的速度值，保留4位小数
+                    return round(speed_mbps, 4)
                 else:
-                    log.debug(f"无法计算速度: 时间={final_elapsed_time}, 字节={downloaded_bytes}")
+                    log.debug(f"无法计算速度: 时间={final_elapsed_time:.3f}, 字节={downloaded_bytes}")
                     return None
 
         except asyncio.TimeoutError:
@@ -669,122 +863,181 @@ class NodeTester:
             proxy_host = proxy_parts[0]
             proxy_port = int(proxy_parts[1])
             
-            log.debug(f"通過原生協議測試速度: SOCKS5 {proxy_host}:{proxy_port}")
+            # 解析測試URL
+            test_url: str = self.config['test_settings']['speed_url']
+            url_parts = test_url.split('/', 3)
+            protocol = url_parts[0][:-1]  # 去掉末尾的冒号
+            host_port = url_parts[2]
+            host_parts = host_port.split(':')
+            target_host = host_parts[0]
+            target_port = int(host_parts[1]) if len(host_parts) > 1 else (443 if protocol == 'https' else 80)
+            target_path = '/' + url_parts[3] if len(url_parts) > 3 else '/'
             
-            # 創建socket連接到SOCKS5代理
+            log.debug(f"開始原生協議速度測試: {test_url}")
+            log.debug(f"目標主機: {target_host}:{target_port}, 路徑: {target_path}")
+            
+            # 創建socket連接到代理
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(duration + 10)
+            # 增加连接超时时间以适应高延迟网络
+            sock.settimeout(20)
             
             try:
-                # 連接到代理
+                # 記錄連接開始時間
+                connection_start = time.perf_counter()
+                log.debug(f"連接到代理: {proxy_host}:{proxy_port}")
                 sock.connect((proxy_host, proxy_port))
+                log.debug("代理連接成功")
                 
                 # SOCKS5握手
+                log.debug("開始SOCKS5握手")
                 sock.send(b'\x05\x01\x00')
                 response = sock.recv(2)
+                log.debug(f"握手響應: {response}")
+                
                 if len(response) != 2 or response[0] != 5:
-                    log.debug("SOCKS5握手失敗")
+                    log.debug(f"SOCKS5握手失敗: 響應={response}")
                     return None
                 
-                # 連接到測試服務器 (使用可靠的服務器)
-                # 使用Google DNS的TCP端口 - 這通常是可達的
-                target_host = "8.8.8.8"
-                target_port = 53
-                
-                # 構造SOCKS5連接請求
-                request = b'\x05\x01\x00\x01'  # SOCKS5, CONNECT, 保留字節, IPv4
-                request += socket.inet_aton(target_host)  # IP地址
-                request += struct.pack('>H', target_port)  # 端口
+                # 建立到目標主機的連接
+                log.debug(f"連接到目標主機: {target_host}:{target_port}")
+                request = b'\x05\x01\x00\x03'  # SOCKS5, CONNECT, 保留字節, 域名類型
+                request += bytes([len(target_host)])  # 域名長度
+                request += target_host.encode()  # 域名
+                request += struct.pack('>H', target_port)  # 端口（大端序）
                 
                 sock.send(request)
+                # 增加接收超时时间
+                sock.settimeout(15)
                 response = sock.recv(10)
-                if len(response) < 2 or response[1] != 0:
-                    log.debug(f"SOCKS5連接失敗，響應代碼: {response[1] if len(response) > 1 else 'unknown'}")
+                log.debug(f"連接響應: {response}")
+                
+                if len(response) < 2 or response[1] != 0:  # 連接失敗
+                    log.debug(f"連接到目標主機失敗: 響應代碼={response[1] if len(response) > 1 else 'unknown'}")
                     return None
                 
-                log.debug("✅ SOCKS5連接成功，開始速度測試")
+                # 構造HTTP請求
+                log.debug(f"構造HTTP請求: GET {target_path}")
+                http_request = f"GET {target_path} HTTP/1.1\r\n"
+                http_request += f"Host: {target_host}\r\n"
+                # 使用更通用的User-Agent以避免被防火墙识别和阻止
+                http_request += "User-Agent: Mozilla/5.0\r\n"
+                http_request += "Accept: */*\r\n"
+                http_request += "Connection: close\r\n"
+                http_request += "\r\n"
                 
-                # 進行精確的速度測試 - 發送大量數據並測量響應
-                start_time = time.monotonic()
-                total_bytes = 0
-                test_packet_size = 4096  # 增加到4KB測試包以提高精度
-                send_count = 0
-                recv_count = 0
+                # 發送HTTP請求
+                log.debug("發送HTTP請求")
+                sock.send(http_request.encode())
                 
-                # 創建測試數據包
-                test_data = b'A' * test_packet_size
+                # 開始計時和下載
+                start_time = time.perf_counter()  # 使用更高精度的計時器
+                downloaded_bytes = 0
+                header_received = False
+                header_buffer = b''
                 
-                log.debug(f"開始精確速度測試，測試時長: {duration}秒，包大小: {test_packet_size}字節")
+                log.debug("開始接收數據...")
                 
-                # 進行持續的數據傳輸測試
+                # 增加总的测试时间以适应慢速连接
+                extended_duration = duration * 3
+                
                 while True:
-                    elapsed = time.monotonic() - start_time
-                    if elapsed >= duration:
+                    elapsed = time.perf_counter() - start_time
+                    # 使用扩展的测试时间
+                    if elapsed >= extended_duration:
+                        log.debug(f"達到測試時間限制: {extended_duration}秒")
                         break
                     
                     try:
-                        # 發送數據
-                        sock.settimeout(1.0)  # 減少超時時間以提高測試頻率
-                        bytes_sent = sock.send(test_data)
-                        if bytes_sent > 0:
-                            total_bytes += bytes_sent
-                            send_count += 1
+                        # 增加接收超时时间
+                        sock.settimeout(8.0)
+                        data = sock.recv(8192)
+                        if not data:
+                            # 如果没有数据但在合理时间内下载了一些数据，则认为测试成功
+                            if downloaded_bytes > 0 and elapsed >= duration / 3:
+                                log.debug("連接關閉，但已下載足夠數據")
+                                break
+                            else:
+                                log.debug("連接關閉，下載數據不足")
+                                break
                         
-                        # 嘗試接收響應（可能沒有響應，這是正常的）
-                        try:
-                            sock.settimeout(0.5)  # 更短的接收超時
-                            response_data = sock.recv(4096)
-                            if response_data:
-                                total_bytes += len(response_data)
-                                recv_count += 1
-                        except socket.timeout:
-                            # 接收超時是正常的，繼續測試
-                            pass
-                        
-                        # 每100次發送記錄一次進度
-                        if send_count % 100 == 0:
-                            current_speed = (total_bytes * 8) / elapsed / (1024 * 1024)
-                            log.debug(f"測試進度: {elapsed:.1f}s, 發送:{send_count}, 接收:{recv_count}, 當前速度:{current_speed:.4f}Mbps")
+                        if not header_received:
+                            # 處理HTTP響應頭
+                            header_buffer += data
+                            if b'\r\n\r\n' in header_buffer:
+                                header_end_pos = header_buffer.find(b'\r\n\r\n') + 4
+                                header_part = header_buffer[:header_end_pos-4].decode('utf-8', errors='ignore')
+                                body_part = header_buffer[header_end_pos:]
+                                
+                                log.debug(f"HTTP響應頭: {header_part[:200]}...")
+                                
+                                # 檢查HTTP狀態碼
+                                status_line = header_part.split('\r\n')[0]
+                                # 接受更多种类的成功状态码
+                                if not any(code in status_line for code in ['200 OK', '206 Partial', '304 Not Modified', '200']):
+                                    log.debug(f"HTTP錯誤: {status_line}")
+                                    # 即使状态码不是200，如果有数据也继续下载
+                                    if not body_part and elapsed < 5:
+                                        # 如果在前5秒内没有收到有效数据，则失败
+                                        return None
+                                
+                                header_received = True
+                                downloaded_bytes += len(body_part)
+                                log.debug(f"開始下載，已收到 {len(body_part)} 字節")
+                            else:
+                                continue
+                        else:
+                            downloaded_bytes += len(data)
+                            
+                            # 每2秒記錄一次進度
+                            if int(elapsed) % 2 == 0 and elapsed > 0:
+                                current_speed = (downloaded_bytes * 8) / elapsed / (1024 * 1024)
+                                log.debug(f"下載進度: {downloaded_bytes/1024:.1f}KB, 當前速度: {current_speed:.4f}Mbps")
                         
                     except socket.timeout:
-                        # 發送超時，繼續測試
+                        log.debug(f"Socket接收超時，當前已下載: {downloaded_bytes} 字節")
+                        # 即使超时，如果已下载足够数据也认为测试成功
+                        if downloaded_bytes > 0 and elapsed >= duration / 3:
+                            log.debug("超時但已下載足夠數據")
+                            break
+                        # 如果在前5秒就超时且没有下载到数据，则失败
+                        if downloaded_bytes == 0 and elapsed < 5:
+                            break
                         continue
                     except Exception as e:
-                        log.debug(f"數據傳輸錯誤: {e}")
+                        log.debug(f"接收數據錯誤: {type(e).__name__}: {e}")
+                        # 遇到异常，如果已下载足够数据则认为测试成功
+                        if downloaded_bytes > 0 and elapsed >= duration / 3:
+                            log.debug("異常但已下載足夠數據")
+                            break
+                        # 如果在前5秒就出错且没有下载到数据，则失败
+                        if downloaded_bytes == 0 and elapsed < 5:
+                            break
                         break
                 
-                final_elapsed = time.monotonic() - start_time
+                final_elapsed = time.perf_counter() - start_time
+                log.debug(f"下載完成: {downloaded_bytes}字節, 耗時: {final_elapsed:.3f}秒")
                 
-                log.debug(f"測試統計: 發送包數: {send_count}, 接收包數: {recv_count}, 總字節: {total_bytes}")
-                
-                if final_elapsed > 0 and total_bytes > 0:
-                    # 精確計算速度（比特每秒轉換為Mbps）
-                    speed_bps = (total_bytes * 8) / final_elapsed
+                # 放宽成功条件，只要有数据下载且用时合理就算成功
+                if final_elapsed > 1 and downloaded_bytes > 0:
+                    speed_bps = (downloaded_bytes * 8) / final_elapsed
                     speed_mbps = speed_bps / (1024 * 1024)
+                    log.debug(f"Socket下載成功: {downloaded_bytes}字節, {final_elapsed:.3f}秒, {speed_mbps:.4f}Mbps")
                     
-                    # 計算數據包成功率
-                    success_rate = (recv_count / send_count * 100) if send_count > 0 else 0
-                    
-                    log.debug(f"原生協議速度測試完成:")
-                    log.debug(f"  總字節: {total_bytes:,}字節")
-                    log.debug(f"  測試時間: {final_elapsed:.3f}秒")
-                    log.debug(f"  發送包: {send_count}, 接收包: {recv_count}")
-                    log.debug(f"  成功率: {success_rate:.1f}%")
-                    log.debug(f"  速度: {speed_mbps:.6f}Mbps")
-                    
-                    # 提高精度，保留更多小數位，降低最低速度閾值
-                    if speed_mbps > 0.001:  # 降低最低速度閾值到0.001Mbps
-                        return round(speed_mbps, 6)  # 保留6位小數以提高排名精度
+                    # 只有在速度合理時才返回結果，返回更高精度的值
+                    if speed_mbps > 0.00005:  # 进一步降低最小速度阈值
+                        return round(speed_mbps, 4)
                     else:
-                        log.debug(f"速度過低: {speed_mbps:.6f}Mbps")
+                        log.debug(f"速度過低: {speed_mbps:.4f}Mbps")
                         return None
                 else:
-                    log.debug("未能獲取有效的速度數據")
+                    log.debug(f"下載失敗: 時間={final_elapsed:.3f}s, 字節={downloaded_bytes}")
                     return None
                 
             finally:
                 sock.close()
                 
         except Exception as e:
-            log.debug(f"原生協議速度測試異常: {type(e).__name__}: {e}")
+            log.debug(f"Socket下載異常: {type(e).__name__}: {e}")
+            import traceback
+            log.debug(f"詳細錯誤信息: {traceback.format_exc()}")
             return None

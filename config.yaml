@@ -6,8 +6,8 @@
 test_settings:
   max_test_nodes: 114        # 测试节点数量限制（设置为 null 或注释掉可无限测试）
   # max_test_nodes: null    # 取消注释此行即可无限测试所有节点
-  concurrency: 10            # 基础并发数
-  concurrency_auto_adjust: false # 是否启用智能并发调整
+  concurrency: 3             # 降低基础并发数避免端口冲突
+  concurrency_auto_adjust: false  # 启用智能并发调整
   timeout: 20               # 增加超时时间
   
   # 延迟测试URLs - 使用更稳定和可靠的测试地址
@@ -25,7 +25,9 @@ test_settings:
     - "http://speedtest.tele2.net/10MB.zip"  # Tele2
     - "http://mirror.internode.on.net/pub/test/10meg.test"  # Internode
   speed_url: "http://speedtest.wdc01.softlayer.com/downloads/test10.zip"  # 主要测试URL（向后兼容）
-  speed_test_duration: 8    # 适中的测试时间
+  speed_test_duration: 15    # 增加测试时间以提高精度
+  speed_test_repeats: 2      # 重复测试次数以提高准确性
+  stability_test_enabled: true  # 启用稳定性测试
 
 # 网络设置优化
 network:

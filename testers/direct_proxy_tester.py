@@ -239,76 +239,118 @@ class DirectProxyTester:
         
         log.debug(f"直接测试节点连通性: {node_type}://{host}:{port}")
         
-        if node_type == 'shadowsocks':
-            method = node.get('method', 'aes-256-gcm')
-            password = node.get('password', '')
-            return await self.test_shadowsocks_connectivity(host, port, method, password)
+        # 增加重试机制
+        retry_count = 3
+        for attempt in range(retry_count):
+            try:
+                if node_type == 'shadowsocks':
+                    method = node.get('method', 'aes-256-gcm')
+                    password = node.get('password', '')
+                    result = await self.test_shadowsocks_connectivity(host, port, method, password)
+                    if result is not None:
+                        return result
+                
+                elif node_type == 'vmess':
+                    uuid = node.get('uuid', '')
+                    result = await self.test_vmess_connectivity(host, port, uuid)
+                    if result is not None:
+                        return result
+                
+                elif node_type == 'vless':
+                    # VLESS通常也可以用类似VMess的方式测试
+                    uuid = node.get('uuid', '')
+                    result = await self.test_vmess_connectivity(host, port, uuid)
+                    if result is not None:
+                        return result
+                
+                elif node_type == 'trojan':
+                    password = node.get('password', '')
+                    result = await self.test_trojan_connectivity(host, port, password)
+                    if result is not None:
+                        return result
+                
+                else:
+                    log.debug(f"不支持的节点类型进行直连测试: {node_type}")
+                    return None
+                    
+            except Exception as e:
+                log.debug(f"第 {attempt + 1} 次直连测试失败: {type(e).__name__}: {e}")
+                if attempt < retry_count - 1:
+                    # 等待一段时间后重试
+                    await asyncio.sleep(1)
+                else:
+                    # 最后一次尝试仍然失败
+                    log.debug(f"所有 {retry_count} 次直连测试都失败了")
+                    return None
         
-        elif node_type == 'vmess':
-            uuid = node.get('uuid', '')
-            return await self.test_vmess_connectivity(host, port, uuid)
-        
-        elif node_type == 'vless':
-            # VLESS通常也可以用类似VMess的方式测试
-            uuid = node.get('uuid', '')
-            return await self.test_vmess_connectivity(host, port, uuid)
-        
-        elif node_type == 'trojan':
-            password = node.get('password', '')
-            return await self.test_trojan_connectivity(host, port, password)
-        
-        else:
-            log.debug(f"不支持的节点类型进行直连测试: {node_type}")
-            return None
+        return None
 
     async def test_through_singbox_socks5(self, proxy_url: str, target_host: str = "8.8.8.8", target_port: int = 53) -> Optional[float]:
         """
         通过sing-box的SOCKS5代理测试连接到目标服务器
         使用DNS服务器作为目标，避免HTTP协议
         """
-        try:
-            import socks
-            import socket
-            
-            # 解析代理URL
-            if not proxy_url.startswith('socks5://'):
-                return None
-            
-            proxy_parts = proxy_url[9:].split(':')  # 移除 'socks5://'
-            if len(proxy_parts) != 2:
-                return None
-            
-            proxy_host = proxy_parts[0]
-            proxy_port = int(proxy_parts[1])
-            
-            start_time = time.monotonic()
-            
-            # 创建SOCKS5连接
-            sock = socks.socksocket()
-            sock.set_proxy(socks.SOCKS5, proxy_host, proxy_port)
-            sock.settimeout(self.timeout)
-            
+        # 增加重试机制
+        retry_count = 3
+        for attempt in range(retry_count):
             try:
-                # 通过代理连接到目标服务器
-                await asyncio.get_event_loop().run_in_executor(
-                    None, 
-                    lambda: sock.connect((target_host, target_port))
-                )
+                import socks
+                import socket
                 
-                elapsed = (time.monotonic() - start_time) * 1000
-                log.debug(f"通过SOCKS5代理连接成功: {target_host}:{target_port} - {elapsed:.0f}ms")
+                # 解析代理URL
+                if not proxy_url.startswith('socks5://'):
+                    return None
                 
-                sock.close()
-                return elapsed
+                proxy_parts = proxy_url[9:].split(':')  # 移除 'socks5://'
+                if len(proxy_parts) != 2:
+                    return None
                 
-            except Exception as e:
-                log.debug(f"通过SOCKS5代理连接失败: {e}")
-                sock.close()
+                proxy_host = proxy_parts[0]
+                proxy_port = int(proxy_parts[1])
+                
+                start_time = time.monotonic()
+                
+                # 创建SOCKS5连接
+                sock = socks.socksocket()
+                sock.set_proxy(socks.SOCKS5, proxy_host, proxy_port)
+                # 增加超时时间以适应慢速网络
+                sock.settimeout(self.timeout * 2)
+                
+                try:
+                    # 通过代理连接到目标服务器
+                    await asyncio.get_event_loop().run_in_executor(
+                        None, 
+                        lambda: sock.connect((target_host, target_port))
+                    )
+                    
+                    elapsed = (time.monotonic() - start_time) * 1000
+                    log.debug(f"通过SOCKS5代理连接成功: {target_host}:{target_port} - {elapsed:.0f}ms")
+                    
+                    sock.close()
+                    return elapsed
+                    
+                except Exception as e:
+                    log.debug(f"第 {attempt + 1} 次通过SOCKS5代理连接失败: {e}")
+                    sock.close()
+                    if attempt < retry_count - 1:
+                        # 等待一段时间后重试
+                        await asyncio.sleep(2)
+                    else:
+                        # 最后一次尝试仍然失败
+                        log.debug(f"所有 {retry_count} 次SOCKS5代理连接测试都失败了")
+                        return None
+                    
+            except ImportError:
+                log.debug("PySocks库未安装，无法进行SOCKS5代理测试")
                 return None
-                
-        except ImportError:
-            log.debug("PySocks库未安装，无法进行SOCKS5代理测试")
-            return None
-        except Exception as e:
-            log.debug(f"SOCKS5代理测试错误: {e}")
-            return None
+            except Exception as e:
+                log.debug(f"SOCKS5代理测试错误: {e}")
+                if attempt < retry_count - 1:
+                    # 等待一段时间后重试
+                    await asyncio.sleep(2)
+                else:
+                    # 最后一次尝试仍然失败
+                    log.debug(f"所有 {retry_count} 次SOCKS5代理测试都失败了")
+                    return None
+        
+        return None

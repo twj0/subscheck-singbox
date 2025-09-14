@@ -63,7 +63,28 @@ def _parse_vless(url: str) -> Dict[str, Any]:
         return None
     
     # 获取网络类型和相关参数
-    network = params.get('type', ['tcp'])
+    network = params.get('type', ['tcp'])[0]  # 确保获取第一个元素
+    
+    # 获取security参数，支持reality等新安全协议
+    security = params.get('security', ['none'])[0]
+    
+    # 获取TLS/SNI相关参数
+    sni = params.get('sni', [parsed_url.hostname])[0]
+    
+    # 获取流控参数
+    flow = params.get('flow', [''])[0]
+    
+    # 获取指纹参数
+    fp = params.get('fp', [''])[0]
+    
+    # 获取公钥参数
+    pbk = params.get('pbk', [''])[0]
+    
+    # 获取SID参数
+    sid = params.get('sid', [''])[0]
+    
+    # 获取headerType参数
+    header_type = params.get('headerType', ['none'])[0]
     
     node_data = {
         'name': urllib.parse.unquote(parsed_url.fragment) if parsed_url.fragment else f"{parsed_url.hostname}:{port}",
@@ -71,21 +92,47 @@ def _parse_vless(url: str) -> Dict[str, Any]:
         'server': parsed_url.hostname,
         'port': int(port),
         'uuid': parsed_url.username,
-        'security': params.get('security', ['none']),
-        'sni': params.get('sni', [parsed_url.hostname]),
+        'security': security,
+        'sni': sni,
         'network': network,
         'original_url': url
     }
     
+    # 添加流控参数（用于XTLS等）
+    if flow:
+        node_data['flow'] = flow
+    
+    # 添加指纹参数
+    if fp:
+        node_data['fp'] = fp
+    
+    # 添加REALITY公钥参数
+    if pbk:
+        node_data['pbk'] = pbk
+    
+    # 添加SID参数
+    if sid:
+        node_data['sid'] = sid
+    
+    # 添加headerType参数
+    if header_type and header_type != 'none':
+        node_data['header_type'] = header_type
+    
     # 添加网络类型相关参数
     if network in ['ws', 'websocket']:
-        node_data['path'] = params.get('path', ['/'])
-        node_data['headers'] = params.get('host', [''])
+        node_data['path'] = params.get('path', ['/'])[0]
+        node_data['host'] = params.get('host', [''])[0]
+        # 同时保留headers以保持兼容性
+        if 'host' in params:
+            node_data['headers'] = params.get('host', [''])[0]
     elif network == 'grpc':
-        node_data['serviceName'] = params.get('serviceName', params.get('grpc-service-name', ['']))
+        node_data['serviceName'] = params.get('serviceName', params.get('grpc-service-name', ['']))[0]
     elif network in ['h2', 'http']:
-        node_data['path'] = params.get('path', ['/'])
-        node_data['headers'] = params.get('host', [''])
+        node_data['path'] = params.get('path', ['/'])[0]
+        node_data['host'] = params.get('host', [''])[0]
+        # 同时保留headers以保持兼容性
+        if 'host' in params:
+            node_data['headers'] = params.get('host', [''])[0]
     
     return node_data
 

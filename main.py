@@ -325,6 +325,39 @@ class SubsCheckUbuntu:
                 ip_purity = node.get('ip_purity', 'N/A') or "N/A"
                 print(f"{i+1:<3} {node['name'][:29]:<30} {speed:<15} {latency:<10} {ip_purity:<15} {node['server']:<20}")
     
+    def display_results_table(self, results: List[Dict[str, Any]]):
+        """显示测试结果（表格形式）"""
+        from rich.console import Console
+        from rich.table import Table
+        
+        console = Console()
+        success_nodes = [r for r in results if r['status'] == 'success']
+        
+        if not success_nodes:
+            self.log.warning("没有成功的节点")
+            return
+        
+        # 按下载速度排序（速度优先）
+        success_nodes.sort(key=lambda x: x.get('download_speed') or 0, reverse=True)
+        
+        output_settings = self.config['output']
+        
+        # Display top N results in a table
+        top_n = output_settings['top_n_results']
+        table = Table(title=f"Top {top_n} Nodes")
+        table.add_column("Rank", style="cyan")
+        table.add_column("Name", style="magenta", max_width=40, overflow="ellipsis")
+        table.add_column("Speed (Mbps)", style="green")
+        table.add_column("Latency (ms)", style="yellow")
+        
+        for i, node in enumerate(success_nodes[:top_n]):
+            # 显示更高精度的速度值
+            speed = f"{node.get('download_speed', 0):.4f}"
+            latency = f"{node.get('http_latency', 0):.0f}"
+            table.add_row(str(i + 1), node['name'], speed, latency)
+        
+        console.print(table)
+    
     async def run(self, subscription_file: str):
         """主运行流程"""
         start_time = time.time()
@@ -530,6 +563,12 @@ def start_scheduler(config: Dict[str, Any]):
             time.sleep(60)  # 每分钟检查一次
     except KeyboardInterrupt:
         log.info("🛡️ 用户中断调度器")
+
+def save_and_display_results(results: List[Dict], config: Dict):
+    """Sorts, saves, and prints results in a table."""
+    success_nodes = [r for r in results if r['status'] == 'success']
+    # Sort by download speed (desc) then latency (asc)
+    success_nodes.sort(key=lambda x: (x.get('download_speed', 0), -x.get('http_latency', 9999)), reverse=True)
 
 async def main():
     """主函数"""
