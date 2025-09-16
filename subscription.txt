@@ -1,52 +1,7 @@
-# ================================
-# 聚合订阅源 (Base64/Mixed格式)
-# ================================
+# SubsCheck-Singbox v3.0 測試訂閱文件
+# 在這裡添加您的代理節點訂閱鏈接
+# 每行一個訂閱鏈接
 
-
-https://gh-proxy.com/https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray
-https://gh-proxy.com/https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt
-https://gh-proxy.com/https://raw.githubusercontent.com/mahdibland/SSAggregator/master/sub/sub_merge.txt
-https://gh-proxy.com/https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2
-https://gh-proxy.com/https://raw.githubusercontent.com/Pawdroid/Free-servers/refs/heads/main/sub
-
-
-https://gh-proxy.com/https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/yudou66.txt
-https://gh-proxy.com/https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/nodefree.txt
-https://gh-proxy.com/https://raw.githubusercontent.com/Barabama/FreeNodes/main/nodes/v2rayshare.txt
-
-
-https://gh-proxy.com/https://raw.githubusercontent.com/Leon406/SubCrawler/refs/heads/main/sub/share/a11
-https://gh-proxy.com/https://raw.githubusercontent.com/Leon406/SubCrawler/refs/heads/main/sub/share/vless
-https://gh-proxy.com/https://raw.githubusercontent.com/ts-sf/fly/main/v2
-
-https://gh-proxy.com/https://raw.githubusercontent.com/Epodonios/v2ray-configs/refs/heads/main/All_Configs_Sub.txt
-https://gh-proxy.com/https://raw.githubusercontent.com/MrMohebi/xray-proxy-grabber-telegram/master/collected-proxies/row-url/all.txt
-
-
-https://cdn.jsdelivr.net/gh/chengaopan/AutoMergePublicNodes@master/list.txt
-https://fastly.jsdelivr.net/gh/chengaopan/AutoMergePublicNodes@master/list.txt
-https://cdn.staticaly.com/gh/chengaopan/AutoMergePublicNodes/master/list.txt
-
-https://gh-proxy.com/https://raw.githubusercontent.com/anaer/Sub/master/sub.list
-https://fastly.jsdelivr.net/gh/anaer/Sub@master/sub.list
-
-# ================================
-# Clash YAML 配置源
-# ================================
-
-# Clash源
-https://gh-proxy.com/https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.meta.yml
-https://gh-proxy.com/https://raw.githubusercontent.com/ripaojiedian/freenode/main/clash
-https://gh-proxy.com/https://raw.githubusercontent.com/vxiaov/free_proxies/main/clash/clash.provider.yaml
-
-https://gh-proxy.com/https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.yml
-https://gh-proxy.com/https://raw.githubusercontent.com/anaer/Sub/main/clash.yaml
-https://gh-proxy.com/https://raw.githubusercontent.com/mfuu/v2ray/master/clash.yaml
-
-https://gh-proxy.com/https://raw.githubusercontent.com/Flikify/getNode/main/clash.yaml
-https://gh-proxy.com/https://raw.githubusercontent.com/snakem982/proxypool/main/source/clash-meta.yaml
-https://cdn.jsdelivr.net/gh/itxve/fetch-clash-node/node/merge.yaml
-
-
-https://gh-proxy.com/https://gist.githubusercontent.com/Yu9191/07a366dfe7e1669d1fe2e7ba8c945047/raw/VPN.txt
-
+# 示例訂閱鏈接（請替換為實際的訂閱鏈接）
+https://raw.githubusercontent.com/mahdibland/SSAggregator/master/sub/sub_merge.txt
+https://api-jx.02000.xin/jx?token=f38030fb2d99c02fcea41f244a9427c5

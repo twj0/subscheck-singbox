@@ -1,670 +1,1004 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-SubsCheck-Ubuntu: 基于Sing-box的代理节点测速工具
-twj0 | 3150774524@qq.com
-专为中国大陆网络环境设计，使用原生协议测试节点连通性
+SubsCheck-Singbox v3.0 - Python+Go混合架構
+基於Go語言核心的高性能代理節點測速工具
 """
 
 import asyncio
-import argparse
-import yaml
-import aiohttp
-import time
-import schedule
-import pytz
-from pathlib import Path
-from typing import List, Dict, Any
-from datetime import datetime, time as dt_time
 import json
-from dotenv import load_dotenv
+import os
+import subprocess
+import sys
+import time
+import argparse
+import re
+import threading
+import codecs
+import signal
+from pathlib import Path
+from typing import Dict, List, Any, Optional
+import yaml
+import logging
+from datetime import datetime
 
-# 导入项目模块
-from utils.logger import setup_logger, get_logger, log_pwsh_command
-from parsers.base_parser import parse_node_url
-from parsers.clash_parser import parse_clash_config
-from testers.node_tester import NodeTester
-from utils.subscription_backup import SubscriptionBackup
-from utils.uploader import ResultUploader
+# 設置日誌
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
-class SubsCheckUbuntu:
-    """
-    SubsCheck-Ubuntu 主类
-    使用 Sing-box 作为代理核心进行高性能节点测试
-    """
-    
-    def __init__(self, config: Dict[str, Any]):
-        self.config = config
-        self.tester = NodeTester(config)
-        # 获取当前的日志器实例
-        from utils.logger import get_logger
-        self.log = get_logger()
+# 顏色和樣式定義
+class Colors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+# 進度條顯示
+class ProgressBar:
+    def __init__(self, total: int, width: int = 50):
+        self.total = total
+        self.width = width
+        self.current = 0
+        self.available = 0
+        self.start_time = time.time()
+        self.lock = threading.Lock()
+        self.active = True
         
-    async def fetch_subscription_content(self, url: str, retry_count: int = 3) -> str:
-        """获取订阅内容，支持重试机制"""
-        for attempt in range(retry_count):
-            try:
-                timeout = aiohttp.ClientTimeout(
-                    total=30,  # 增加总超时时间
-                    connect=15,  # 连接超时
-                    sock_read=15  # 读取超时
-                )
-                headers = {
-                    'User-Agent': self.config['network']['user_agent'],
-                    'Accept': '*/*',
-                    'Accept-Encoding': 'gzip, deflate',
-                    'Connection': 'keep-alive'
-                }
+    def update(self, current: int, available: int):
+        with self.lock:
+            self.current = current
+            self.available = available
+            
+    def increment(self, available: bool = False):
+        with self.lock:
+            self.current += 1
+            if available:
+                self.available += 1
                 
-                # 使用更适合的连接器配置
-                connector = aiohttp.TCPConnector(
-                    limit=30,
-                    limit_per_host=10,
-                    ttl_dns_cache=300,
-                    use_dns_cache=True,
-                    enable_cleanup_closed=True
-                )
-                
-                async with aiohttp.ClientSession(
-                    connector=connector, 
-                    timeout=timeout,
-                    trust_env=True  # 使用系统代理设置
-                ) as session:
-                    async with session.get(url, headers=headers) as response:
+    def display(self):
+        if not self.active:
+            return
+            
+        percent = self.current / self.total if self.total > 0 else 0
+        filled_width = int(self.width * percent)
+        bar = '█' * filled_width + '░' * (self.width - filled_width)
+        
+        elapsed = time.time() - self.start_time
+        if self.current > 0:
+            eta = (elapsed / self.current) * (self.total - self.current)
+        else:
+            eta = 0
+            
+        # 計算成功率
+        success_rate = (self.available / self.current * 100) if self.current > 0 else 0
+        
+        print(f'\r{Colors.OKBLUE}🔄 進度: {Colors.BOLD}{bar}{Colors.ENDC} {percent:.1%} '
+              f'({self.current}/{self.total}) '
+              f'{Colors.OKGREEN}✓{self.available}{Colors.ENDC} '
+              f'{Colors.WARNING}⏱️ {elapsed:.1f}s{Colors.ENDC} '
+              f'{Colors.OKBLUE}⏳ ETA: {eta:.1f}s{Colors.ENDC} '
+              f'{Colors.OKGREEN}成功率: {success_rate:.1f}%{Colors.ENDC}', 
+              end='', flush=True)
+              
+    def finish(self):
+        self.active = False
+        print()  # 換行
+
+class GoSubsChecker:
+    """Go核心測速器的Python包裝器"""
+    
+    def __init__(self, config_path: str = "config.yaml"):
+        self.config_path = config_path
+        self.go_executable = None
+        self.config = self._load_config()
+        
+    def _load_config(self) -> Dict[str, Any]:
+        """載入配置文件"""
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            logger.error(f"載入配置文件失敗: {e}")
+            return {}
+    
+    def _find_go_executable(self) -> Optional[str]:
+        """查找Go可執行文件"""
+        possible_names = [
+            "subscheck.exe",
+            "subscheck",
+            "subs-check.exe", 
+            "subs-check"
+        ]
+        
+        # 首先檢查當前目錄
+        for name in possible_names:
+            if Path(name).exists():
+                return str(Path(name).absolute())
+        
+        # 檢查構建目錄
+        build_dir = Path("build")
+        if build_dir.exists():
+            for name in possible_names:
+                exe_path = build_dir / name
+                if exe_path.exists():
+                    return str(exe_path.absolute())
+        
+        return None
+    
+    async def compile_go_if_needed(self) -> bool:
+        """如果需要，編譯Go程序"""
+        self.go_executable = self._find_go_executable()
+        
+        if self.go_executable and Path(self.go_executable).exists():
+            logger.info(f"✅ 找到Go可執行文件: {self.go_executable}")
+            return True
+        
+        logger.info("🔨 Go可執行文件不存在，開始編譯...")
+        
+        # 檢查Go環境
+        try:
+            result = subprocess.run(["go", "version"], capture_output=True, text=True, timeout=10)
+            if result.returncode != 0:
+                logger.error("❌ Go環境未找到，請安裝Go語言")
+                return False
+            logger.info(f"✅ Go環境: {result.stdout.strip()}")
+        except Exception as e:
+            logger.error(f"❌ 檢查Go環境失敗: {e}")
+            return False
+        
+        # 編譯Go程序
+        try:
+            build_dir = Path("build")
+            build_dir.mkdir(exist_ok=True)
+            
+            executable_name = "subscheck.exe" if os.name == 'nt' else "subscheck"
+            output_path = build_dir / executable_name
+            
+            compile_cmd = [
+                "go", "build", 
+                "-ldflags", "-s -w",
+                "-o", str(output_path),
+                "."
+            ]
+            
+            logger.info("🔨 編譯中...")
+            result = subprocess.run(
+                compile_cmd, 
+                capture_output=True, 
+                text=True, 
+                timeout=120
+            )
+            
+            if result.returncode != 0:
+                logger.error(f"❌ 編譯失敗: {result.stderr}")
+                return False
+            
+            self.go_executable = str(output_path)
+            logger.info(f"✅ 編譯成功: {self.go_executable}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ 編譯過程出錯: {e}")
+            return False
+    
+    async def parse_subscriptions(self, subscription_file: str = "subscription.txt") -> List[str]:
+        """解析訂閱文件，獲取所有訂閱鏈接"""
+        subscription_urls = []
+        
+        # 從subscription.txt讀取
+        if Path(subscription_file).exists():
+            with open(subscription_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and line.startswith('http'):
+                        subscription_urls.append(line)
+        
+        # 從config.yaml的sub-urls讀取
+        config_urls = self.config.get('sub-urls', [])
+        subscription_urls.extend(config_urls)
+        
+        # 去重
+        subscription_urls = list(set(subscription_urls))
+        logger.info(f"📋 解析到 {len(subscription_urls)} 個訂閱鏈接")
+        
+        return subscription_urls
+
+    async def _fetch_and_parse_single(self, url: str) -> List[str]:
+        try:
+            content = await self.fetch_subscription_content(url)
+            if not content:
+                return []
+            nodes = await self.parse_nodes_from_content(content)
+            return nodes
+        except Exception:
+            return []
+
+    async def collect_nodes_concurrently(self, urls: List[str], max_nodes: int, concurrency: int = 3) -> List[str]:
+        """並發獲取並解析多個訂閱，達到上限即停止"""
+        semaphore = asyncio.Semaphore(concurrency)
+        collected: List[str] = []
+        lock = asyncio.Lock()
+
+        async def worker(u: str):
+            nonlocal collected
+            async with semaphore:
+                nodes = await self._fetch_and_parse_single(u)
+                async with lock:
+                    if nodes:
+                        collected.extend(nodes)
+                        try:
+                            from urllib.parse import urlparse
+                            host = urlparse(u).netloc or u
+                        except Exception:
+                            host = u
+                        print(f"{Colors.OKGREEN}✅ 來源[{host}] 解析到 {len(nodes)} 個節點{Colors.ENDC}")
+                    else:
+                        try:
+                            from urllib.parse import urlparse
+                            host = urlparse(u).netloc or u
+                        except Exception:
+                            host = u
+                        logger.warning(f"來源[{host}] 未解析到有效節點")
+        
+        tasks = []
+        for i, u in enumerate(urls, 1):
+            print(f"{Colors.OKBLUE}📡 獲取訂閱 {i}/{len(urls)}: {u[:60]}...{Colors.ENDC}")
+            tasks.append(asyncio.create_task(worker(u)))
+        
+        # 等待任務完成，同時檢查是否達到上限
+        for t in asyncio.as_completed(tasks):
+            await t
+            async with lock:
+                if len(collected) >= max_nodes:
+                    break
+        
+        # 取消剩餘任務
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        
+        return collected[:max_nodes]
+    
+    async def fetch_subscription_content(self, url: str) -> str:
+        """獲取訂閱內容"""
+        import aiohttp
+        import random
+        import ssl
+        from urllib.parse import urlparse
+        
+        max_retries = 5  # 增加重試次数
+        retry_delay = 1.0  # 初始重試延遲時間
+        
+        # 常見瀏覽器的User-Agent列表
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.1 Safari/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36',
+            'SubCheck-Singbox/3.0'
+        ]
+        
+        # 解析域名用於SNI
+        parsed = urlparse(url)
+        ssl_ctx = ssl.create_default_context()
+        
+        # 使用连接池优化
+        connector = aiohttp.TCPConnector(
+            limit_per_host=5,
+            ssl=ssl_ctx
+        )
+        
+        # 應用 GitHub 代理鏡像（如配置提供），加速大陸環境訪問
+        gh_proxy = (self.config.get('github-proxy') or self.config.get('github_proxy') or '').strip()
+        request_url = url
+        if gh_proxy and url.startswith(('https://raw.githubusercontent.com', 'https://github.com', 'https://gist.github.com', 'https://api.github.com')):
+            # 常見鏡像寫法：'https://ghproxy.com/' + 原始URL
+            request_url = gh_proxy.rstrip('/') + '/' + url
+
+        # 支持在大陸環境下通過本地/上游代理拉取訂閱
+        http_proxy = (self.config.get('proxy') or self.config.get('http_proxy') or '').strip() or None
+
+        async with aiohttp.ClientSession(connector=connector, trust_env=False) as session:
+            for attempt in range(max_retries + 1):
+                try:
+                    # 使用更灵活的超时设置
+                    timeout = aiohttp.ClientTimeout(
+                        total=60,  # 增加总超时时间
+                        connect=30,  # 增加连接超时时间
+                        sock_read=45,  # 增加套接字读取超时
+                        sock_connect=20  # 增加套接字连接超时
+                    )
+                    
+                    # 隨機选择User-Agent
+                    headers = {
+                        'User-Agent': random.choice(user_agents),
+                        'Accept': '*/*',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Connection': 'keep-alive',
+                        'Cache-Control': 'no-cache'
+                    }
+                    
+                    async with session.get(request_url, headers=headers, timeout=timeout, proxy=http_proxy) as response:
                         if response.status == 200:
-                            content = await response.text(encoding='utf-8', errors='ignore')
-                            self.log.info(f"订阅获取成功: {url[:50]}...")
+                            content = await response.text()
+                            logger.debug(f"✅ 獲取訂閱成功: {request_url[:50]}... (嘗試次數: {attempt + 1})")
+                            
+                            # 关闭连接池中的连接以避免资源泄漏
+                            await session.connector.close()
                             return content
-                        elif response.status in [301, 302, 303, 307, 308]:
+                        elif response.status == 301 or response.status == 302:
                             # 处理重定向
                             redirect_url = response.headers.get('Location')
-                            if redirect_url and attempt == 0:  # 只在第一次尝试重定向
-                                self.log.info(f"订阅被重定向到: {redirect_url}")
-                                return await self.fetch_subscription_content(redirect_url, 1)
+                            if redirect_url:
+                                logger.info(f"🔄 訂閱源重定向到: {redirect_url} (嘗試次數: {attempt + 1})")
+                                request_url = redirect_url  # 更新URL以进行重试
+                                continue
                         else:
-                            self.log.warning(f"订阅返回错误 {response.status}: {url}")
+                            logger.warning(f"⚠️ 訂閱響應錯誤 {response.status}: {request_url[:50]}... (嘗試次數: {attempt + 1})")
                             
-            except asyncio.TimeoutError:
-                self.log.error(f"订阅获取超时 (attempt {attempt + 1}/{retry_count}): {url[:50]}...")
-            except aiohttp.ClientConnectorError as e:
-                self.log.error(f"订阅连接错误 (attempt {attempt + 1}/{retry_count}): {str(e)[:100]}")
-            except aiohttp.ClientError as e:
-                self.log.error(f"订阅客户端错误 (attempt {attempt + 1}/{retry_count}): {str(e)[:100]}")
-            except Exception as e:
-                self.log.error(f"订阅获取失败 (attempt {attempt + 1}/{retry_count}): {str(e)[:100]}")
-            
-            # 如果不是最后一次尝试，等待后重试
-            if attempt < retry_count - 1:
-                wait_time = 2 ** attempt  # 指数退补
-                self.log.info(f"等待 {wait_time} 秒后重试...")
-                await asyncio.sleep(wait_time)
+                except asyncio.TimeoutError:
+                    logger.warning(f"⏰ 訂閱源訪問超時 (第{attempt + 1}次嘗試): {request_url} (連接超時)")
+                except aiohttp.ClientResponseError as e:
+                    logger.warning(f"🌐 訂閱源響應錯誤 (第{attempt + 1}次嘗試): {request_url} - {e}")
+                except aiohttp.ClientConnectionError as e:
+                    logger.warning(f"🔌 訂閱源連接錯誤 (第{attempt + 1}次嘗試): {request_url} - {e}")
+                except aiohttp.ClientError as e:
+                    logger.warning(f"🌐 訂閱源網絡錯誤 (第{attempt + 1}次嘗試): {request_url} - {e}")
+                except Exception as e:
+                    logger.warning(f"❌ 訂閱源訪問失敗 (第{attempt + 1}次嘗試): {request_url} - {e}")
+                
+                if attempt < max_retries:
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避策略
+                    # 隨机抖动，避免所有请求同步
+                    retry_delay += random.uniform(0, retry_delay)
         
+        logger.error(f"❌ 訂閱源 {request_url} 在 {max_retries + 1} 次嘗試後仍然無法訪問")
+        # 关闭连接池中的连接以避免资源泄漏
+        await session.connector.close()
         return ""
     
-    def parse_subscription_content(self, content: str) -> List[Dict[str, Any]]:
-        """智能解析订阅内容"""
-        nodes = []
-        
-        # 尝试YAML解析 (Clash 格式)
-        try:
-            config_data = yaml.safe_load(content)
-            if isinstance(config_data, dict) and 'proxies' in config_data:
-                self.log.info("检测到Clash YAML格式")
-                clash_nodes = parse_clash_config(config_data)
-                nodes.extend(clash_nodes)
-                return nodes
-        except Exception:
-            pass
-        
-        # 尝试Base64解码
-        try:
-            import base64
-            decoded = base64.b64decode(content.strip()).decode('utf-8')
-            if any(proto in decoded for proto in ['vless://', 'vmess://', 'trojan://', 'ss://']):
-                self.log.info("检测到Base64编码内容")
-                content = decoded
-        except Exception:
-            pass
-        
-        # 解析链接
-        for line in content.strip().split('\n'):
-            line = line.strip()
-            if not line or line.startswith('#'):
+    async def parse_nodes_from_content(self, content: str) -> List[str]:
+        """從訂閱內容解析節點（多策略解碼，選擇最優結果）"""
+        import base64
+        import re
+        import gzip
+        import zlib
+
+        def extract_nodes_from_text(text: str) -> List[str]:
+            nodes_local: List[str] = []
+            for raw_line in text.splitlines():
+                line = raw_line.strip()
+                if not line:
+                    continue
+                if any(line.startswith(proto) for proto in ['ss://', 'vmess://', 'vless://', 'trojan://', 'hysteria://', 'tuic://']):
+                    nodes_local.append(line)
+            return nodes_local
+
+        def try_decoders(raw_bytes: bytes) -> List[str]:
+            candidates: List[str] = []
+            # 1) 原始文本
+            try:
+                candidates.append(raw_bytes.decode('utf-8', errors='ignore'))
+            except Exception:
+                candidates.append(str(content))
+            # 2) Base64（寬鬆，忽略空白）
+            try:
+                b64_clean = re.sub(rb"\s+", b"", raw_bytes)
+                candidates.append(base64.b64decode(b64_clean, validate=False).decode('utf-8', errors='ignore'))
+            except Exception:
+                pass
+            # 3) gzip
+            try:
+                candidates.append(gzip.decompress(raw_bytes).decode('utf-8', errors='ignore'))
+            except Exception:
+                pass
+            # 4) zlib
+            try:
+                candidates.append(zlib.decompress(raw_bytes).decode('utf-8', errors='ignore'))
+            except Exception:
+                pass
+            return candidates
+
+        raw_bytes = content if isinstance(content, (bytes, bytearray)) else str(content).encode('utf-8', errors='ignore')
+        texts = try_decoders(raw_bytes)
+
+        # 選擇包含最多節點URI的文本作為最優解碼結果
+        best_text: str = ''
+        best_nodes: List[str] = []
+        for t in texts:
+            nodes_candidate = extract_nodes_from_text(t)
+            if len(nodes_candidate) > len(best_nodes):
+                best_nodes = nodes_candidate
+                best_text = t
+
+        # 若所有解碼都未提取到節點，退回最可能的文本（原始文本）
+        if not best_nodes:
+            best_text = texts[0] if texts else (content if isinstance(content, str) else '')
+
+        nodes: List[str] = []
+        for raw_line in best_text.splitlines():
+            line = raw_line.strip()
+            if not line:
                 continue
-            
-            node = parse_node_url(line)
-            if node:
-                nodes.append(node)
-        
+            if any(line.startswith(proto) for proto in ['ss://', 'vmess://', 'vless://', 'trojan://', 'hysteria://', 'tuic://']):
+                nodes.append(line)
+            elif line.startswith('http') and ('subscribe' in line or 'sub' in line):
+                # 嵌套訂閱，遞歸獲取
+                nested_content = await self.fetch_subscription_content(line)
+                if nested_content:
+                    nested_nodes = await self.parse_nodes_from_content(nested_content)
+                    nodes.extend(nested_nodes)
+
         return nodes
     
-    def deduplicate_nodes(self, nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """节点去重"""
-        seen = set()
-        unique_nodes = []
-        
-        for node in nodes:
-            try:
-                # 使用服务器、端口和类型作为唯一标识
-                key = (node['server'], node['port'], node['type'])
-                if key not in seen:
-                    seen.add(key)
-                    unique_nodes.append(node)
-            except (KeyError, TypeError):
-                continue
-        
-        return unique_nodes
-    
-    async def test_nodes(self, nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """批量测试节点（增强稳定性）"""
-        if not nodes:
-            self.log.warning("没有节点可以测试")
-            return []
-        
-        self.log.info(f"开始测试 {len(nodes)} 个节点...")
-        
-        # 根据节点数量动态调整并发数
-        base_concurrency = self.config['test_settings']['concurrency']
-        auto_adjust = self.config['test_settings'].get('concurrency_auto_adjust', True)
+    async def run_speed_test(self, subscription_file: str = "subscription.txt") -> Dict[str, Any]:
+        """Python解析訂閱 + Go核心測速的混合方案"""
+        if not self.go_executable:
+            logger.error(f"{Colors.FAIL}❌ Go可執行文件未找到{Colors.ENDC}")
+            return {"success": False, "error": "Go executable not found"}
 
-        if auto_adjust:
-            if len(nodes) > 100:
-                # 大量节点时降低并发数
-                actual_concurrency = max(1, base_concurrency // 2)
-                self.log.info(f"检测到大量节点，智能调整并发数至 {actual_concurrency} 以提高稳定性")
-            elif len(nodes) < 10:
-                # 少量节点时可以提高并发数
-                actual_concurrency = min(len(nodes), base_concurrency + 1)
-            else:
-                actual_concurrency = base_concurrency
-        else:
-            actual_concurrency = base_concurrency
-            self.log.info(f"智能并发调整已禁用，使用固定并发数: {actual_concurrency}")
+        temp_dir = Path("temp_subscheck")
+        temp_dir.mkdir(exist_ok=True)
         
-        # 并发测试
-        semaphore = asyncio.Semaphore(actual_concurrency)
-        
-        async def test_with_limit(node: Dict[str, Any], index: int) -> Dict[str, Any]:
-            async with semaphore:
-                try:
-                    return await self.tester.test_single_node(node, index)
-                except Exception as e:
-                    self.log.error(f"节点测试异常 [{index+1}]: {e}")
-                    return {
-                        'name': node.get('name', 'Unnamed'),
-                        'server': node.get('server', 'N/A'),
-                        'port': node.get('port', 'N/A'),
-                        'type': node.get('type', 'N/A'),
-                        'status': 'failed',
-                        'error': f'Test exception: {str(e)[:100]}',
-                        'http_latency': None,
-                        'download_speed': None
-                    }
-        
-        # 创建任务
-        tasks = [test_with_limit(node, i) for i, node in enumerate(nodes)]
-        
-        # 执行测试（增加进度显示）
-        results = []
-        completed = 0
-        
-        # 分批执行以提高稳定性
-        batch_size = min(20, len(tasks))  # 每批最多20个任务
-        
-        for i in range(0, len(tasks), batch_size):
-            batch_tasks = tasks[i:i+batch_size]
-            self.log.info(f"正在执行第 {i//batch_size + 1} 批测试（{len(batch_tasks)} 个节点）")
-            
-            try:
-                batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                
-                # 处理结果
-                for result in batch_results:
-                    if isinstance(result, Exception):
-                        self.log.error(f"批量测试异常: {result}")
-                        results.append({
-                            'name': 'Unknown',
-                            'server': 'N/A',
-                            'port': 'N/A', 
-                            'type': 'N/A',
-                            'status': 'failed',
-                            'error': f'Batch test exception: {str(result)[:100]}',
-                            'http_latency': None,
-                            'download_speed': None
-                        })
+        httpd = None
+        progress_bar = None
+        temp_config_file = Path("temp_config.yaml")
+        process = None
+
+        try:
+            print(f"\n{Colors.OKGREEN}🚀 開始Python+Go混合測速...{Colors.ENDC}")
+            print(f"{Colors.OKBLUE}📁 配置文件: {self.config_path}{Colors.ENDC}")
+            print(f"{Colors.OKBLUE}📄 訂閱文件: {subscription_file}{Colors.ENDC}")
+
+            # Phase 1: Python解析訂閱
+            print(f"\n{Colors.WARNING}🐍 Phase 1: Python解析訂閱...{Colors.ENDC}")
+            subscription_urls = await self.parse_subscriptions(subscription_file)
+
+            if not subscription_urls:
+                print(f"{Colors.FAIL}❌ 沒有找到有效的訂閱鏈接{Colors.ENDC}")
+                return {"success": False, "error": "No valid subscription URLs found"}
+
+            all_nodes: List[str] = []
+            max_test_nodes = 100
+            # 並發抓取與解析，加速慢源
+            all_nodes = await self.collect_nodes_concurrently(subscription_urls, max_test_nodes, concurrency=min(4, len(subscription_urls)))
+
+            unique_nodes = list(set(all_nodes))
+            print(f"{Colors.OKBLUE}📊 總節點數: {len(all_nodes)}, 去重後: {len(unique_nodes)}{Colors.ENDC}")
+
+            if not unique_nodes:
+                print(f"{Colors.FAIL}❌ 沒有解析到有效節點{Colors.ENDC}")
+                return {"success": False, "error": "No valid nodes found"}
+            if len(unique_nodes) > max_test_nodes:
+                unique_nodes = unique_nodes[:max_test_nodes]
+                print(f"{Colors.WARNING}⚡ 限制測試節點數量為 {max_test_nodes}{Colors.ENDC}")
+
+            # Phase 2: Go核心測速
+            print(f"\n{Colors.WARNING}⚡ Phase 2: Go核心測速...{Colors.ENDC}")
+
+            from http.server import HTTPServer, BaseHTTPRequestHandler
+
+            test_port = 8299
+            nodes_content = '\n'.join(unique_nodes)
+
+            class NodeHandler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    if self.path == '/nodes':
+                        self.send_response(200)
+                        self.send_header('Content-type', 'text/plain; charset=utf-8')
+                        self.end_headers()
+                        self.wfile.write(nodes_content.encode('utf-8'))
                     else:
-                        results.append(result)
-                    
-                completed += len(batch_tasks)
-                self.log.info(f"测试进度: {completed}/{len(nodes)} ({completed/len(nodes)*100:.1f}%)")
+                        self.send_response(404)
+                        self.end_headers()
                 
-                # 批次间隔稍作等待，减少系统负载
-                if i + batch_size < len(tasks):
-                    await asyncio.sleep(1)
-                    
-            except Exception as e:
-                self.log.error(f"批量测试失败: {e}")
-                # 继续处理下一批
+                def log_message(self, format, *args):
+                    pass
+
+            httpd = HTTPServer(('127.0.0.1', test_port), NodeHandler)
+            server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            server_thread.start()
+            print(f"{Colors.OKGREEN}🌐 臨時HTTP服務器啟動: http://127.0.0.1:{test_port}/nodes{Colors.ENDC}")
+
+            temp_config = self.config.copy()
+            temp_config['sub-urls'] = [f"http://127.0.0.1:{test_port}/nodes"]
+            # 强制设置cron表达式为空，确保Go程序立即执行而不是等待定时任务
+            temp_config['cron-expression'] = ""
+            # 强制禁用Go侧HTTP服务器，避免其常驻导致Python等待退出
+            temp_config['listen-port'] = ""
+            
+            with open(temp_config_file, 'w', encoding='utf-8') as f:
+                import yaml
+                yaml.dump(temp_config, f, default_flow_style=False, allow_unicode=True)
+
+            cmd = [self.go_executable, "-f", str(temp_config_file)]
+            start_time = time.time()
+            print(f"{Colors.OKBLUE}🔄 啟動Go測速程序...{Colors.ENDC}")
+
+            progress_bar = ProgressBar(len(unique_nodes))
+            progress_thread = threading.Thread(target=self._show_progress, args=(progress_bar,))
+            progress_thread.daemon = True
+            progress_thread.start()
+
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=Path.cwd()
+            )
+
+            # 實時讀取Go輸出，根據進度行更新進度條；檢測到完成後立即結束Go進程
+            stdout_lines: List[str] = []
+            stderr_lines: List[str] = []
+            timeout_occurred = False
+
+            completion_event = asyncio.Event()
+
+            async def _read_stream(stream: asyncio.StreamReader, is_stdout: bool):
+                nonlocal stdout_lines, stderr_lines
+                buffer = ''
+                while True:
+                    try:
+                        chunk = await stream.read(1024)
+                    except Exception:
+                        break
+                    if not chunk:
+                        # flush remaining buffer
+                        if buffer:
+                            text = buffer
+                            if is_stdout:
+                                stdout_lines.append(text)
+                            else:
+                                stderr_lines.append(text)
+                            # parse once more
+                            for seg in re.split(r"[\r\n]", text):
+                                if not seg:
+                                    continue
+                                try:
+                                    # 支持簡體/繁體的『进度/進度』關鍵詞
+                                    m = re.search(r"[进進]度:\s*\[[^\]]*\]\s*(\d+\.\d+)%\s*\((\d+)/(\d+)\)\s*可用:\s*(\d+)", seg)
+                                    if m:
+                                        _, cur, total, available = m.groups()
+                                        progress_bar.update(int(cur), int(available))
+                                        if int(total) > 0 and int(cur) >= int(total):
+                                            completion_event.set()
+                                    if ('检测完成' in seg) or ('檢測完成' in seg):
+                                        completion_event.set()
+                                    if '可用节点数量' in seg:
+                                        completion_event.set()
+                                except Exception:
+                                    pass
+                        break
+                    text = chunk.decode('utf-8', errors='ignore')
+                    buffer += text
+                    # split by CR or LF to form segments
+                    parts = re.split(r"([\r\n])", buffer)
+                    # reassemble complete segments (ending with a delimiter), keep tail
+                    assembled = []
+                    tail = ''
+                    for i in range(0, len(parts)-1, 2):
+                        seg = parts[i]
+                        delim = parts[i+1]
+                        if delim in ('\r', '\n'):
+                            assembled.append(seg)
+                        else:
+                            tail += seg + delim
+                    if len(parts) % 2 == 1:
+                        tail += parts[-1]
+                    buffer = tail
+                    for seg in assembled:
+                        if not seg:
+                            continue
+                        if is_stdout:
+                            stdout_lines.append(seg + '\n')
+                        else:
+                            stderr_lines.append(seg + '\n')
+                        try:
+                            # 支持簡體/繁體的『进度/進度』關鍵詞
+                            m = re.search(r"[进進]度:\s*\[[^\]]*\]\s*(\d+\.\d+)%\s*\((\d+)/(\d+)\)\s*可用:\s*(\d+)", seg)
+                            if m:
+                                _, cur, total, available = m.groups()
+                                progress_bar.update(int(cur), int(available))
+                                if int(total) > 0 and int(cur) >= int(total):
+                                    completion_event.set()
+                            if ('检测完成' in seg) or ('檢測完成' in seg):
+                                completion_event.set()
+                            if '可用节点数量' in seg:
+                                completion_event.set()
+                        except Exception:
+                            pass
+
+            reader_tasks = [
+                asyncio.create_task(_read_stream(process.stdout, True)),
+                asyncio.create_task(_read_stream(process.stderr, False))
+            ]
+
+            # 估算最大等待時間，亦作為保險超時
+            wait_time = min(120 + len(unique_nodes) // 5, 600)
+            print(f"{Colors.WARNING}⏳ 等待Go程序完成測速 (最長 {wait_time} 秒)...{Colors.ENDC}")
+
+            try:
+                # 等待完成事件或總超時
+                await asyncio.wait_for(completion_event.wait(), timeout=wait_time)
+            except asyncio.TimeoutError:
+                timeout_occurred = True
+                print(f"{Colors.WARNING}⚠️ Go程序超時，強制終止{Colors.ENDC}")
+            finally:
+                # 嘗試優雅結束Go進程
+                try:
+                    if process.returncode is None:
+                        process.terminate()
+                        try:
+                            await asyncio.wait_for(process.wait(), timeout=3)
+                        except asyncio.TimeoutError:
+                            process.kill()
+                            await process.wait()
+                except Exception:
+                    pass
+
+                # 等待讀取任務結束
+                try:
+                    await asyncio.wait_for(asyncio.gather(*reader_tasks, return_exceptions=True), timeout=3)
+                except asyncio.TimeoutError:
+                    for t in reader_tasks:
+                        t.cancel()
+
+            stdout = ''.join(stdout_lines)
+            stderr = ''.join(stderr_lines)
+
+
+            duration = time.time() - start_time
+            print(f"{Colors.OKGREEN}✅ Go核心測速完成 (耗時: {duration:.1f}s){Colors.ENDC}")
+
+            results = self._parse_go_output(stdout, stderr)
+            
+            return {
+                "success": True,
+                "results": results,
+                "total_nodes": len(all_nodes),
+                "tested_nodes": len(unique_nodes),
+                "duration": duration,
+                "stdout": stdout,
+                "stderr": stderr,
+                "timeout": timeout_occurred
+            }
+
+        finally:
+            if progress_bar:
+                progress_bar.finish()
+            if httpd:
+                httpd.shutdown()
+                httpd.server_close()
+            if temp_config_file.exists():
+                try:
+                    os.remove(temp_config_file)
+                except OSError as e:
+                    logger.warning(f"無法刪除臨時配置文件: {e}")
+            
+            # 確保進程被徹底清理
+            if process and process.returncode is None:
+                try:
+                    process.kill()
+                    await process.wait()
+                except Exception as e:
+                    logger.warning(f"清理Go進程時出錯: {e}")
+    
+    def _show_progress(self, progress_bar: ProgressBar):
+        """顯示進度條的線程函數"""
+        while progress_bar.active:
+            progress_bar.display()
+            time.sleep(0.5)
+    
+    def _parse_go_output(self, stdout: str, stderr: str) -> Dict[str, Any]:
+        """解析Go程序的輸出，提取測速結果"""
+        import re
+        
+        results = {
+            "progress_info": [],
+            "test_results": [],
+            "statistics": {},
+            "successful_nodes": [],
+            "failed_nodes": []
+        }
+        
+        if not stdout:
+            return results
+        
+        lines = stdout.split('\n')
+        for line in lines:
+            line = line.strip()
+            if not line:
                 continue
+                
+            # 解析進度信息（支持簡體/繁體『进度/進度』）
+            if (('进度:' in line) or ('進度:' in line)) and '可用:' in line:
+                progress_match = re.search(r'[进進]度:.*?(\d+\.\d+)%.*?\((\d+)/(\d+)\).*?可用:\s*(\d+)', line)
+                if progress_match:
+                    percent, current, total, available = progress_match.groups()
+                    results["progress_info"].append({
+                        "percent": float(percent),
+                        "current": int(current),
+                        "total": int(total),
+                        "available": int(available)
+                    })
+            
+            # 解析統計信息
+            elif 'INFO' in line:
+                if '获取节点数量:' in line:
+                    match = re.search(r'获取节点数量:\s*(\d+)', line)
+                    if match:
+                        results["statistics"]["total_nodes"] = int(match.group(1))
+                elif '去重后节点数量:' in line:
+                    match = re.search(r'去重后节点数量:\s*(\d+)', line)
+                    if match:
+                        results["statistics"]["unique_nodes"] = int(match.group(1))
+                elif '可用节点数量:' in line:
+                    match = re.search(r'可用节点数量:\s*(\d+)', line)
+                    if match:
+                        results["statistics"]["available_nodes"] = int(match.group(1))
+                elif '测试总消耗流量:' in line:
+                    match = re.search(r'测试总消耗流量:\s*([\d.]+)GB', line)
+                    if match:
+                        results["statistics"]["total_traffic"] = float(match.group(1))
+            
+            # 解析節點測試結果 (假設Go程序會輸出類似格式)
+            # 我們需要修改Go程序來輸出更詳細的節點信息
+            elif '✓' in line or '✗' in line:
+                # 嘗試解析節點測試結果
+                # 格式: ✓ [協議] 節點名 - IP:端口 | 延遲: XXXms | 速度: XXX Mbps
+                node_match = re.search(r'([✓✗])\s*\[([^\]]+)\]\s*([^-]+)-\s*([^|]+)\|.*?延遲:\s*(\d+)ms.*?速度:\s*([\d.]+)\s*Mbps', line)
+                if node_match:
+                    status, protocol, name, ip_port, latency, speed = node_match.groups()
+                    node_result = {
+                        "name": name.strip(),
+                        "protocol": protocol.strip(),
+                        "ip_port": ip_port.strip(),
+                        "latency": int(latency),
+                        "speed": float(speed),
+                        "success": status == '✓'
+                    }
+                    
+                    if node_result["success"]:
+                        results["successful_nodes"].append(node_result)
+                    else:
+                        results["failed_nodes"].append(node_result)
         
         return results
     
-    def save_results(self, results: List[Dict[str, Any]]) -> str:
-        """保存测试结果"""
-        results_dir = Path(self.config['output']['results_dir'])
-        results_dir.mkdir(exist_ok=True)
-        
-        # 筛选成功的结果并按下载速度排序（速度优先）
-        success_results = [r for r in results if r['status'] == 'success']
-        # 按下载速度降序排列（速度越快越好）
-        success_results.sort(key=lambda x: x.get('download_speed') or 0, reverse=True)
-        
-        # 生成结果文件
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = results_dir / f"subscheck_results_{timestamp}.json"
-        
-        result_data = {
-            'timestamp': datetime.now().isoformat(),
-            'total_tested': len(results),
-            'success_count': len(success_results),
-            'success_rate': f"{len(success_results)/len(results)*100:.1f}%" if results else "0%",
-            'test_config': {
-                'max_nodes': self.config['test_settings']['max_test_nodes'],
-                'concurrency': self.config['test_settings']['concurrency'],
-                'timeout': self.config['test_settings']['timeout']
-            },
-            'top_nodes': success_results[:self.config['output']['show_top_nodes']],
-            'all_results': results if self.config['output']['save_all_results'] else success_results
-        }
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(result_data, f, indent=2, ensure_ascii=False)
-        
-        self.log.info(f"结果已保存: {filename}")
-        return str(filename)
-    
-    def display_results(self, results: List[Dict[str, Any]]):
-        """显示测试结果"""
-        success_results = [r for r in results if r['status'] == 'success']
-        
-        if not success_results:
-            self.log.warning("没有成功的节点")
+    def display_results(self, result: Dict[str, Any]):
+        """顯示測速結果"""
+        if not result.get("success"):
+            print(f"\n{Colors.FAIL}❌ 測速失敗: {result.get('error', 'Unknown error')}{Colors.ENDC}")
             return
         
-        # 按下载速度排序（速度优先）
-        success_results.sort(key=lambda x: x.get('download_speed') or 0, reverse=True)
+        # 顯示結果標題
+        print(f"\n{Colors.BOLD}{Colors.HEADER}{'=' * 80}{Colors.ENDC}")
+        print(f"{Colors.BOLD}{Colors.HEADER}🎯 SubsCheck-Singbox v3.0 Python+Go混合測速結果{Colors.ENDC}")
+        print(f"{Colors.BOLD}{Colors.HEADER}{'=' * 80}{Colors.ENDC}")
         
-        print(f"\n{'=' * 80}")
-        print(f"测试结果统计")
-        print(f"{'=' * 80}")
-        print(f"总测试节点: {len(results)}")
-        print(f"成功节点: {len(success_results)}")
-        print(f"成功率: {len(success_results)/len(results)*100:.1f}%")
+        # 顯示基本統計
+        total_nodes = result.get("total_nodes", 0)
+        tested_nodes = result.get("tested_nodes", 0)
+        duration = result.get("duration", 0)
         
-        # 显示最佳节点
-        show_count = min(self.config['output']['show_top_nodes'], len(success_results))
-        if show_count > 0:
-            print(f"\n最佳节点 (按速度排名前{show_count}个):")
-            print(f"{'-' * 80}")
-            print(f"{'#':<3} {'Name':<30} {'Speed':<15} {'Latency':<10} {'IP Purity':<15} {'Server':<20}")
-            print(f"{'-' * 95}")
+        # 優先使用Go端去重後的節點數或進度總數，以避免與Python側統計不一致
+        results = result.get("results", {})
+        statistics = results.get("statistics", {})
+        progress_info = results.get("progress_info", [])
+        tested_nodes_display = tested_nodes
+        if isinstance(statistics.get("unique_nodes"), int) and statistics.get("unique_nodes") > 0:
+            tested_nodes_display = statistics.get("unique_nodes")
+        elif progress_info:
+            tested_nodes_display = progress_info[-1].get("total", tested_nodes)
+
+        print(f"{Colors.OKBLUE}📊 節點統計:{Colors.ENDC}")
+        print(f"   {Colors.OKGREEN}└─{Colors.ENDC} Python解析節點: {Colors.BOLD}{total_nodes:,}{Colors.ENDC}")
+        print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 實際測試節點: {Colors.BOLD}{tested_nodes_display:,}{Colors.ENDC}")
+        
+        # 解析並顯示Go程序的結果
+        statistics = results.get("statistics", {})
+        successful_nodes = results.get("successful_nodes", [])
+        failed_nodes = results.get("failed_nodes", [])
+        
+        # 嘗試從stderr獲取更多統計信息
+        available_count = 0
+        total_traffic = 0.0
+        
+        if result.get("stderr"):
+            stderr_lines = result["stderr"].split('\n')
+            for line in stderr_lines:
+                if 'INFO' in line:
+                    if '可用节点数量:' in line:
+                        match = re.search(r'可用节点数量:\s*(\d+)', line)
+                        if match:
+                            available_count = int(match.group(1))
+                    elif '测试总消耗流量:' in line:
+                        match = re.search(r'测试总消耗流量:\s*([\d.]+)GB', line)
+                        if match:
+                            total_traffic = float(match.group(1))
+        
+        # 如果沒有從stderr獲取到，使用之前解析的數據
+        if available_count == 0 and "available_nodes" in statistics:
+            available_count = statistics["available_nodes"]
+        if total_traffic == 0.0 and "total_traffic" in statistics:
+            total_traffic = statistics["total_traffic"]
+        
+        # 顯示Go核心測速統計
+        print(f"\n{Colors.WARNING}⚡ Go核心測速統計:{Colors.ENDC}")
+        if "total_nodes" in statistics:
+            print(f"   {Colors.OKGREEN}└─{Colors.ENDC} Go接收節點: {Colors.BOLD}{statistics['total_nodes']}{Colors.ENDC}")
+        if "unique_nodes" in statistics:
+            print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 去重後節點: {Colors.BOLD}{statistics['unique_nodes']}{Colors.ENDC}")
+        if available_count > 0:
+            print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 可用節點: {Colors.BOLD}{Colors.OKGREEN}{available_count}{Colors.ENDC}")
+        if total_traffic > 0:
+            print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 消耗流量: {Colors.BOLD}{total_traffic:.3f} GB{Colors.ENDC}")
+        
+        # 如果沒有解析到詳細節點信息，顯示原始Go輸出的統計
+        if not successful_nodes and not failed_nodes and result.get("stdout"):
+            print(f"\n{Colors.OKBLUE}📄 Go程序原始輸出摘要:{Colors.ENDC}")
+            stdout_lines = result["stdout"].split('\n')
+            for line in stdout_lines[-20:]:  # 顯示最後20行
+                if 'INFO' in line and any(keyword in line for keyword in ['节点数量', '可用节点', '消耗流量', '检测完成']):
+                    print(f"   {Colors.OKGREEN}└─{Colors.ENDC} {line.split('INFO')[-1].strip()}")
+        
+        # 顯示成功的節點詳情
+        if successful_nodes:
+            print(f"\n{Colors.OKGREEN}✅ 成功節點詳情 ({len(successful_nodes)}個):{Colors.ENDC}")
+            print(f"{Colors.OKBLUE}{'-' * 80}{Colors.ENDC}")
+            for i, node in enumerate(successful_nodes[:10], 1):  # 只顯示前10個
+                protocol_emoji = {
+                    'ss': '🔐', 'vmess': '🚀', 'vless': '⚡', 
+                    'trojan': '🏛️', 'hysteria': '💨', 'tuic': '🔥'
+                }.get(node.get('protocol', '').lower(), '📡')
+                
+                print(f"{Colors.BOLD}{i:2d}.{Colors.ENDC} {protocol_emoji} [{Colors.OKBLUE}{node.get('protocol', 'Unknown')}{Colors.ENDC}] {Colors.BOLD}{node.get('name', 'Unnamed')}{Colors.ENDC}")
+                print(f"    📍 {node.get('ip_port', 'Unknown IP')}")
+                print(f"    ⏱️  延遲: {Colors.WARNING}{node.get('latency', 0)}ms{Colors.ENDC} | 🚀 速度: {Colors.OKGREEN}{node.get('speed', 0):.2f} Mbps{Colors.ENDC}")
+                if i < len(successful_nodes) and i < 10:
+                    print()
             
-            for i, node in enumerate(success_results[:show_count]):
-                # 根據速度大小選擇合適的精度顯示
-                if node.get('download_speed'):
-                    speed_val = node.get('download_speed', 0)
-                    if speed_val >= 1:
-                        speed = f"{speed_val:.2f}Mbps"
-                    elif speed_val >= 0.1:
-                        speed = f"{speed_val:.3f}Mbps"
-                    else:
-                        speed = f"{speed_val:.6f}Mbps"
-                else:
-                    speed = "N/A"
-                latency = f"{node.get('http_latency', 0):.0f}ms" if node.get('http_latency') else "N/A"
-                ip_purity = node.get('ip_purity', 'N/A') or "N/A"
-                print(f"{i+1:<3} {node['name'][:29]:<30} {speed:<15} {latency:<10} {ip_purity:<15} {node['server']:<20}")
+            if len(successful_nodes) > 10:
+                print(f"    {Colors.WARNING}... 還有 {len(successful_nodes) - 10} 個成功節點{Colors.ENDC}")
+        
+        # 顯示失敗節點統計
+        if failed_nodes:
+            print(f"\n{Colors.FAIL}❌ 失敗節點: {len(failed_nodes)}個{Colors.ENDC}")
+            
+            # 按協議分組統計失敗節點
+            failed_by_protocol = {}
+            for node in failed_nodes:
+                protocol = node.get('protocol', 'Unknown')
+                failed_by_protocol[protocol] = failed_by_protocol.get(protocol, 0) + 1
+            
+            for protocol, count in failed_by_protocol.items():
+                print(f"   {Colors.OKGREEN}└─{Colors.ENDC} {protocol}: {count}個")
+        
+        # 顯示進度信息（最後一個進度）
+        if progress_info:
+            last_progress = progress_info[-1]
+            print(f"\n{Colors.OKBLUE}📈 測速進度:{Colors.ENDC}")
+            print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 完成度: {Colors.BOLD}{last_progress['percent']:.1f}%{Colors.ENDC}")
+            print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 已測試: {Colors.BOLD}{last_progress['current']}/{last_progress['total']}{Colors.ENDC}")
+            print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 實時可用: {Colors.BOLD}{Colors.OKGREEN}{last_progress['available']}{Colors.ENDC}")
+        
+        print(f"\n{Colors.WARNING}⏱️  執行時間:{Colors.ENDC}")
+        print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 總耗時: {Colors.BOLD}{duration:.1f} 秒{Colors.ENDC}")
+        if tested_nodes > 0:
+            print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 平均每節點: {Colors.BOLD}{duration/tested_nodes:.2f} 秒{Colors.ENDC}")
+        
+        # 計算成功率
+        total_tested = len(successful_nodes) + len(failed_nodes)
+        if total_tested > 0:
+            success_rate = len(successful_nodes) / total_tested * 100
+            print(f"\n{Colors.OKBLUE}📈 測試結果:{Colors.ENDC}")
+            print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 成功率: {Colors.BOLD}{success_rate:.1f}%{Colors.ENDC} ({Colors.OKGREEN}{len(successful_nodes)}{Colors.ENDC}/{total_tested})")
+            if successful_nodes:
+                avg_speed = sum(node.get('speed', 0) for node in successful_nodes) / len(successful_nodes)
+                avg_latency = sum(node.get('latency', 0) for node in successful_nodes) / len(successful_nodes)
+                print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 平均速度: {Colors.BOLD}{Colors.OKGREEN}{avg_speed:.2f} Mbps{Colors.ENDC}")
+                print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 平均延遲: {Colors.BOLD}{Colors.WARNING}{avg_latency:.0f}ms{Colors.ENDC}")
+        
+        print(f"\n{Colors.OKBLUE}🔧 版本信息:{Colors.ENDC}")
+        print(f"   {Colors.OKGREEN}└─{Colors.ENDC} Python橋接: v3.0 (智能訂閱解析)")
+        print(f"   {Colors.OKGREEN}└─{Colors.ENDC} Go核心: v3.0 (原生協議測速)")
+        
+        # 如果是超時終止，顯示提示
+        if result.get("timeout"):
+            print(f"\n{Colors.WARNING}⚠️  注意: Go程序因超時被終止，結果可能不完整{Colors.ENDC}")
+        
+        # 添加使用提示
+        print(f"\n{Colors.OKBLUE}💡 使用提示:{Colors.ENDC}")
+        print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 編輯 {Colors.BOLD}config.yaml{Colors.ENDC} 添加您的訂閱鏈接")
+        print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 創建 {Colors.BOLD}.env{Colors.ENDC} 文件配置 GitHub Gist 或 WebDAV")
+        print(f"   {Colors.OKGREEN}└─{Colors.ENDC} 使用 {Colors.BOLD}uv run main.py --help{Colors.ENDC} 查看更多選項")
+        
+        print(f"{Colors.BOLD}{Colors.HEADER}{'=' * 80}{Colors.ENDC}")
+
+class PythonScheduler:
+    """Python定時調度器 - 保留Python的調度優勢"""
     
-    def display_results_table(self, results: List[Dict[str, Any]]):
-        """显示测试结果（表格形式）"""
-        from rich.console import Console
-        from rich.table import Table
-        
-        console = Console()
-        success_nodes = [r for r in results if r['status'] == 'success']
-        
-        if not success_nodes:
-            self.log.warning("没有成功的节点")
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.scheduler_config = config.get("scheduler", {})
+    
+    async def setup_scheduler(self):
+        """設置定時任務"""
+        if not self.scheduler_config.get("enabled", False):
+            logger.info("定時調度器已禁用")
             return
         
-        # 按下载速度排序（速度优先）
-        success_nodes.sort(key=lambda x: x.get('download_speed') or 0, reverse=True)
+        schedule_time = self.scheduler_config.get("time", "20:00")
+        timezone = self.scheduler_config.get("timezone", "Asia/Shanghai")
         
-        output_settings = self.config['output']
-        
-        # Display top N results in a table
-        top_n = output_settings['top_n_results']
-        table = Table(title=f"Top {top_n} Nodes")
-        table.add_column("Rank", style="cyan")
-        table.add_column("Name", style="magenta", max_width=40, overflow="ellipsis")
-        table.add_column("Speed (Mbps)", style="green")
-        table.add_column("Latency (ms)", style="yellow")
-        
-        for i, node in enumerate(success_nodes[:top_n]):
-            # 显示更高精度的速度值
-            speed = f"{node.get('download_speed', 0):.4f}"
-            latency = f"{node.get('http_latency', 0):.0f}"
-            table.add_row(str(i + 1), node['name'], speed, latency)
-        
-        console.print(table)
-    
-    async def run(self, subscription_file: str):
-        """主运行流程"""
-        start_time = time.time()
-        
-        self.log.info("=" * 60)
-        self.log.info("SubsCheck-Ubuntu v1.0 - 基于Sing-box的代理节点测速工具")
-        self.log.info("=" * 60)
-        
-        # 检查订阅文件
-        sub_file = Path(subscription_file)
-        if not sub_file.exists():
-            self.log.error(f"订阅文件不存在: {subscription_file}")
-            return
-        
-        # 读取订阅链接
-        with open(sub_file, 'r', encoding='utf-8') as f:
-            urls = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-        
-        self.log.info(f"发现 {len(urls)} 个订阅链接")
-        
-        if not urls:
-            self.log.error("没有找到有效的订阅链接")
-            return
-        
-        # 获取所有节点
-        all_nodes = []
-        for i, url in enumerate(urls, 1):
-            self.log.info(f"正在获取订阅 {i}/{len(urls)}: {url[:50]}...")
-            content = await self.fetch_subscription_content(url)
-            if content:
-                nodes = self.parse_subscription_content(content)
-                all_nodes.extend(nodes)
-                self.log.info(f"从订阅解析到 {len(nodes)} 个节点")
-        
-        if not all_nodes:
-            self.log.error("没有解析到有效节点")
-            return
-        
-        # 去重
-        unique_nodes = self.deduplicate_nodes(all_nodes)
-        self.log.info(f"去重后共 {len(unique_nodes)} 个节点")
-        
-        # 限制测试数量（如果配置了的话）
-        max_test_nodes = self.config.get('test_settings', {}).get('max_test_nodes')
-        if max_test_nodes and max_test_nodes > 0 and len(unique_nodes) > max_test_nodes:
-            unique_nodes = unique_nodes[:max_test_nodes]
-            self.log.info(f"限制测试节点数量为 {max_test_nodes}")
-        else:
-            self.log.info(f"将测试所有 {len(unique_nodes)} 个节点（未设置节点数量限制）")
-        
-        try:
-            # 测试节点
-            results = await self.test_nodes(unique_nodes)
-            
-            # 显示结果
-            self.display_results(results)
-            
-            # 保存结果
-            result_file = self.save_results(results)
-            
-            # 统计
-            end_time = time.time()
-            duration = end_time - start_time
-            success_count = len([r for r in results if r['status'] == 'success'])
-            
-            self.log.info(f"\n测试完成! 耗时: {duration:.1f}s, 成功: {success_count}/{len(results)}")
-            
-            # 上传测试结果
-            if self.config.get('upload_settings', {}).get('enabled', False):
-                self.log.info("开始上传测试结果...")
-                result_uploader = ResultUploader(self.config)
-                await result_uploader.upload_results(results, len(unique_nodes))
-
-            # 备份订阅
-            if self.config.get('subscription_backup', {}).get('enabled', False):
-                self.log.info("开始备份成功的节点...")
-                backup_module = SubscriptionBackup(self.config)
-                successful_nodes = [r for r in results if r['status'] == 'success']
-                await backup_module.backup_subscription(successful_nodes)
-            
-        finally:
-            # 清理资源
-            await self.tester.cleanup()
-
-def load_config(config_file: str = 'config.yaml') -> Dict[str, Any]:
-    """加载配置文件并解析环境变量"""
-    from utils.logger import get_logger
-    from utils.config_utils import parse_env_variables
-    log = get_logger()
-    
-    config_path = Path(config_file)
-    if not config_path.exists():
-        log.error(f"配置文件不存在: {config_file}")
-        raise FileNotFoundError(f"配置文件不存在: {config_file}")
-    
-    with open(config_path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load(f)
-        
-    # 解析环境变量
-    config = parse_env_variables(config)
-    
-    log.info(f"配置加载成功: {config_file}")
-    return config
-
-async def run_speed_test(config_file: str, subscription_file: str, max_nodes: int = None, debug: bool = False):
-    """执行一次完整的测速任务"""
-    from utils.logger import setup_logger, get_logger
-    
-    # 设置日志
-    setup_logger(debug_mode=debug, debug_dir='debug')
-    log = get_logger()
-    
-    try:
-        log.info("=" * 60)
-        log.info("开始执行定时测速任务")
-        log.info(f"执行时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        log.info("=" * 60)
-        
-        # 加载配置
-        config = load_config(config_file)
-        
-        # 命令行参数覆盖配置
-        if max_nodes:
-            config['test_settings']['max_test_nodes'] = max_nodes
-        
-        # 创建并运行测试器
-        checker = SubsCheckUbuntu(config)
-        await checker.run(subscription_file)
-        
-        log.info("定时测速任务完成")
-        
-    except Exception as e:
-        log.error(f"定时任务执行失败: {e}")
-        raise
-
-def schedule_job(config: Dict[str, Any]):
-    """定时任务的包装函数"""
-    # 使用传入的配置
-    scheduler_config = config.get('scheduler', {})
-    asyncio.run(run_speed_test(
-        config_file='config.yaml',
-        subscription_file='subscription.txt',
-        max_nodes=config.get('test_settings', {}).get('max_test_nodes'),
-        debug=False
-    ))
-
-def start_scheduler(config: Dict[str, Any]):
-    """启动定时任务调度器"""
-    from utils.logger import setup_logger, get_logger
-    
-    # 设置日志
-    setup_logger(debug_mode=False, debug_dir='debug')
-    log = get_logger()
-    
-    # 从配置文件读取定时任务设置
-    scheduler_config = config.get('scheduler', {})
-    
-    if not scheduler_config.get('enabled', False):
-        log.warning("🚫 定时任务未在配置中启用")
-        return
-    
-    # 获取时间设置
-    schedule_time = scheduler_config.get('time', '20:00')  # 默认中国时间20点
-    timezone_name = scheduler_config.get('timezone', 'Asia/Shanghai')
-    is_daily = scheduler_config.get('daily', True)
-    
-    try:
-        # 设置时区
-        tz = pytz.timezone(timezone_name)
-        
-        # 解析时间
-        hour, minute = map(int, schedule_time.split(':'))
-        
-        # 计算UTC时间（用于Schedule库）
-        # 创建一个今天的datetime对象
-        local_dt = tz.localize(datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0))
-        utc_dt = local_dt.astimezone(pytz.UTC)
-        utc_time_str = utc_dt.strftime('%H:%M')
-        
-        log.info(f"🕑 定时任务调度器已启动")
-        log.info(f"📅 执行时间: 每天 {schedule_time} ({timezone_name})")
-        log.info(f"🌍 UTC时间: {utc_time_str}")
-        log.info(f"🚪 按 Ctrl+C 停止调度器")
-        
-        # 设置定时任务（使用UTC时间）
-        if is_daily:
-            schedule.every().day.at(utc_time_str).do(lambda: schedule_job(config))
-        
-        # 立即检查是否已经到了执行时间
-        now_utc = datetime.now(pytz.UTC)
-        if now_utc.hour == utc_dt.hour and now_utc.minute == utc_dt.minute:
-            log.info("🚀 当前时间正好是执行时间，立即执行一次")
-            schedule_job(config)
-        
-    except Exception as e:
-        log.error(f"时间配置解析失败: {e}")
-        log.info("使用默认配置: 每天UTC 12:00 (中国时间20:00)")
-        schedule.every().day.at("12:00").do(lambda: schedule_job(config))
-    
-    try:
-        while True:
-            schedule.run_pending()
-            time.sleep(60)  # 每分钟检查一次
-    except KeyboardInterrupt:
-        log.info("🛡️ 用户中断调度器")
-
-def save_and_display_results(results: List[Dict], config: Dict):
-    """Sorts, saves, and prints results in a table."""
-    success_nodes = [r for r in results if r['status'] == 'success']
-    # Sort by download speed (desc) then latency (asc)
-    success_nodes.sort(key=lambda x: (x.get('download_speed', 0), -x.get('http_latency', 9999)), reverse=True)
+        logger.info(f"📅 定時調度已啟用: 每天 {schedule_time} ({timezone})")
+        # 這裡可以集成APScheduler等Python調度庫
+        # 暫時保留接口，後續擴展
 
 async def main():
-    """主函数"""
-    # 加载 .env 文件
-    load_dotenv()
-    
-    parser = argparse.ArgumentParser(
-        description="SubsCheck-Ubuntu - 基于Sing-box的代理节点测速工具",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例:
-  python main.py                           # 使用默认配置
-  python main.py -s my_subs.txt           # 指定订阅文件
-  python main.py -c custom_config.yaml    # 指定配置文件
-  python main.py -n 20                    # 限制测试节点数
-  python main.py --scheduler              # 启动定时任务模式
-  python main.py --run-once               # 立即执行一次测试
-
-定时任务设置:
-  在 config.yaml 中修改 scheduler 配置：
-  scheduler:
-    enabled: true
-    time: "20:00"             # 中国时间
-    timezone: "Asia/Shanghai"
-    daily: true
-        """
-    )
-    
-    parser.add_argument('-s', '--subscription', default='subscription.txt',
-                       help="订阅文件路径 (默认: subscription.txt)")
-    parser.add_argument('-c', '--config', default='config.yaml',
-                       help="配置文件路径 (默认: config.yaml)")
-    parser.add_argument('-n', '--max-nodes', type=int,
-                       help="最大测试节点数 (覆盖配置文件)")
-    parser.add_argument('-d', '--debug', action='store_true',
-                       help="启用debug模式，记录详细日志和PowerShell输出")
-    parser.add_argument('--debug-dir', default='debug',
-                       help="debug日志文件夹 (默认: debug)")
-    parser.add_argument('--scheduler', action='store_true',
-                       help="启用定时任务模式，每天中国时间20点(UTC 12点)执行")
-    parser.add_argument('--run-once', action='store_true',
-                       help="立即执行一次测试任务")
-    parser.add_argument('--version', action='version', version='SubsCheck-Ubuntu v1.0')
+    """主入口函數"""
+    parser = argparse.ArgumentParser(description="SubsCheck-Singbox v3.0 - Python+Go混合架構")
+    parser.add_argument("-f", "--config", default="config.yaml", help="配置文件路徑")
+    parser.add_argument("-s", "--subscription", default="subscription.txt", help="訂閱文件路徑")
+    parser.add_argument("--compile-only", action="store_true", help="僅編譯Go程序")
+    parser.add_argument("--python-scheduler", action="store_true", help="啟用Python定時調度器")
+    parser.add_argument("--version", action="version", version="SubsCheck-Singbox v3.0")
     
     args = parser.parse_args()
     
-    try:
-        # 设置debug模式
-        debug_logger = setup_logger(debug_mode=args.debug, debug_dir=args.debug_dir)
-        log = get_logger()
-        
-        if args.debug:
-            log.info("🐛 Debug模式已启用")
-            
-            # 记录系统信息
-            import platform
-            import sys
-            debug_info = {
-                'platform': platform.platform(),
-                'python_version': sys.version,
-                'command_args': vars(args),
-                'timestamp': datetime.now().isoformat()
-            }
-            debug_logger.save_debug_info(debug_info, 'system_info.json')
-            
-            # 测试PowerShell命令
-            log_pwsh_command('Get-Host | Select-Object Version')
-        
-        # 加载配置
-        config = load_config(args.config)
-        
-        # 命令行参数覆盖配置
-        if args.max_nodes:
-            config['test_settings']['max_test_nodes'] = args.max_nodes
-        
-        # 根据参数决定运行模式
-        if args.scheduler:
-            # 定时任务模式
-            log.info("🕑 启动定时任务模式")
-            start_scheduler(config)
-        elif args.run_once:
-            # 立即执行一次
-            log.info("🚀 立即执行一次测试")
-            await run_speed_test(args.config, args.subscription, args.max_nodes, args.debug)
-        else:
-            # 默认模式：直接运行
-            checker = SubsCheckUbuntu(config)
-            await checker.run(args.subscription)
-        
-    except KeyboardInterrupt:
-        log = get_logger()
-        log.info("用户中断测试")
-    except Exception as e:
-        log = get_logger()
-        log.error(f"程序运行失败: {e}")
-        raise
+    print("🚀 SubsCheck-Singbox v3.0 - Python+Go混合架構")
+    print("=" * 60)
+    print("🐍 Python層: 配置管理、結果展示、定時調度")  
+    print("⚡ Go核心: 高性能測速、併發控制、代理檢測")
+    print("=" * 60)
+    
+    # 初始化Go測速器
+    checker = GoSubsChecker(args.config)
+    
+    # 編譯Go程序
+    if not await checker.compile_go_if_needed():
+        logger.error("❌ Go程序編譯失敗，退出")
+        return 1
+    
+    if args.compile_only:
+        logger.info("✅ 僅編譯模式完成")
+        return 0
+    
+    # 初始化Python調度器
+    if args.python_scheduler:
+        scheduler = PythonScheduler(checker.config)
+        await scheduler.setup_scheduler()
+        logger.info("Python定時調度器已啟動，程序將保持運行...")
+        try:
+            while True:
+                await asyncio.sleep(60)  # 保持運行
+        except KeyboardInterrupt:
+            logger.info("收到中斷信號，退出程序")
+            return 0
+    
+    # 執行測速
+    result = await checker.run_speed_test(args.subscription)
+    
+    # 顯示結果
+    checker.display_results(result)
+    
+    return 0 if result.get("success") else 1
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        exit_code = asyncio.run(main())
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        logger.info("程序被用戶中斷")
+        sys.exit(130)
+    except Exception as e:
+        logger.error(f"程序執行失敗: {e}")
+        sys.exit(1)

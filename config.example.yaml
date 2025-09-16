@@ -1,0 +1,60 @@
+# SubsCheck-Singbox v3.0 Go核心配置
+# 基於Go語言的高性能代理節點測速工具
+
+# 是否显示进度
+print-progress: true
+
+# 並發控制設置
+concurrent: 20              # 並發線程數
+success-limit: 0            # 保存幾個成功的節點，0代表不限制
+timeout: 5000               # 超時時間(毫秒)
+
+# 測速配置
+speed-test-url: "https://github.com/AaronFeng753/Waifu2x-Extension-GUI/releases/download/v2.21.12/Waifu2x-Extension-GUI-v2.21.12-Portable.7z"
+download-timeout: 10        # 下載測試時間(s)
+download-mb: 20            # 單節點測速下載數據大小(MB)限制，0為不限
+total-speed-limit: 0       # 總下載速度限制(MB/s)，0為不限
+min-speed: 512             # 最低測速結果捨棄(KB/s)
+
+# 訂閱設置
+sub-urls:
+  - "subscription_url_1"
+  - "subscription_url_2"
+
+# 節點過濾
+filter-regex: ""           # 節點名稱過濾正則表達式
+node-type: []              # 只測試指定協議的節點 ["ss", "vmess", "vless"]
+
+# 流媒體檢測
+media-check: false         # 是否開啟流媒體檢測
+platforms:                 # 檢測平台列表
+  - iprisk
+  - youtube
+  - netflix
+  - openai
+
+# 結果保存
+save-method: "local"       # 保存方式: local, gist, webdav, r2
+output-dir: "results"      # 輸出目錄
+
+# 節點重命名
+rename-node: true          # 是否重命名節點
+node-prefix: ""            # 節點名稱前綴
+keep-success-proxies: false # 保留之前測試成功的節點
+
+# 定時任務
+cron-expression: "0 0 20 * * ?" # Cron表達式，每天20:00執行
+
+# WebDAV配置（可選）
+webdav-url: ""
+webdav-username: ""
+webdav-password: ""
+
+# GitHub Gist配置（可選）
+github-token: ""
+github-gist-id: ""
+
+# 通知配置（可選）
+apprise-api-server: ""
+recipient-url: []
+notify-title: "🔔 節點狀態更新"

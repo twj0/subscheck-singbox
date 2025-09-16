@@ -1,142 +1,491 @@
-中文 | [English](README-en.md)
-# SubsCheck-Ubuntu 使用指南
+# SubsCheck-Singbox v3.0
 
-## 🚀 项目概述
+🚀 **Python+Go混合架构的高性能代理节点测速工具**
 
-SubsCheck-Ubuntu 是一个基于 Sing-box 的高性能代理节点测速工具，适用于 Ubuntu VPS 环境，也支持本地开发。
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://golang.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#)
 
-### ✨ 核心功能
+## ✨ 特色功能
 
-- **多协议支持**: 支持 VLESS, VMess, Trojan, Shadowsocks 等主流协议的解析。
-- **高性能测速**: 基于 `sing-box` 核心，提供准确的 HTTP 延迟和真实下载速度测试。
-- **结果自动化**:
-    - **上传测试结果**: 可将详细的 JSON 格式测试结果上传到 Gist, WebDAV, 或通过 Webhook 发送。
-    - **备份可用节点**: 可将所有测试成功的节点生成一个新的订阅文件，并上传到 Gist 或 WebDAV，方便客户端直接使用。
-- **定时任务**: 支持通过 `cron` 或内置调度器实现每日自动测速和上传。
-- **环境安全**: 支持通过 `.env` 文件管理敏感信息，避免密码等硬编码在配置文件中。
+### 🐍 Python层 (智能订阅解析)
+- ✅ **多格式订阅支持**：base64、plain text、嵌套订阅、YAML、JSON
+- ✅ **多协议支持**：ss://, vmess://, vless://, trojan://, hysteria://, tuic://
+- ✅ **智能去重**：自动去除重复节点，提高测试效率
+- ✅ **数量控制**：智能限制测试节点数量，避免超时
+- ✅ **临时HTTP服务器**：解决Go程序文件读取问题
 
-## 🛠️ 使用方式
+### ⚡ Go核心 (原生协议测速)
+- ✅ **原生协议测速**：每个节点使用其原生协议测试，结果更准确
+- ✅ **高性能并发**：10个并发线程高效测速，支持自定义并发数
+- ✅ **实时进度显示**：清晰的进度条和状态，实时掌握测试进度
+- ✅ **资源管理**：自动清理临时文件和服务器，避免资源泄漏
+- ✅ **跨GFW测试**：真实的翻墙环境速度测试，结果更可靠
 
-### 本地开发 (推荐使用 uv)
+### 🌐 流媒体检测
+- ✅ **多平台支持**：YouTube、Netflix、OpenAI、Disney+、Gemini、TikTok
+- ✅ **IP风险检测**：检测代理IP的风险等级和地理位置
+- ✅ **区域解锁检测**：检测不同流媒体平台的解锁区域
 
-```bash
-# 1. 安装依赖 (uv 会自动创建虚拟环境)
-uv pip install -r requirements.txt
+### 💾 多种结果保存方式
+- ✅ **本地保存**：保存到本地文件，支持YAML、Base64等多种格式
+- ✅ **GitHub Gist**：保存到GitHub Gist，方便分享和同步
+- ✅ **WebDAV**：保存到WebDAV服务器，支持私有云存储
+- ✅ **S3/MinIO**：保存到S3/MinIO对象存储，支持大规模部署
+- ✅ **Cloudflare R2**：保存到Cloudflare R2，全球CDN加速
 
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，填入你的 Gist, WebDAV 等服务的凭据
+## 🏗️ 项目结构
 
-# 3. 配置 config.yaml
-# 根据你的需求，启用并配置 upload_settings 和 subscription_backup
-
-# 4. 运行程序
-uv run python main.py
-
-# 5. 指定参数运行
-uv run python main.py -s my_subscription.txt -n 20
-
-# 6. 启用 debug 模式
-uv run python main.py -d
+```
+SubsCheck-Singbox v3.0/
+├── 🐍 Python层
+│   ├── main.py              # 主程序入口，混合架构控制
+│   ├── config.yaml          # 配置文件
+│   ├── requirements.txt     # Python依赖
+│   ├── .env.example         # 环境变量模板
+│   ├── parsers/             # 订阅解析器
+│   ├── testers/             # 测速器
+│   ├── core/                # 核心功能
+│   └── utils/               # 工具函数
+│
+├── ⚡ Go核心
+│   ├── main.go              # Go程序入口
+│   ├── go.mod/go.sum        # Go模块管理
+│   ├── app/                 # 应用逻辑
+│   ├── check/               # 测速和检测
+│   ├── proxy/               # 代理处理
+│   ├── save/                # 结果保存
+│   └── utils/               # Go工具函数
+│
+└── 📁 其他
+    ├── build/               # 编译输出
+    ├── install.sh           # Linux/Unix安装脚本
+    ├── install_windows.bat  # Windows安装脚本
+    ├── python_legacy/       # 旧版Python代码
+    └── config.example.yaml  # 配置示例
 ```
 
-### 远程 VPS 部署
+## 🚀 快速开始
 
+### 方法一：自动安装脚本 (推荐)
+
+#### Ubuntu/Debian 系统
 ```bash
-# 1. 一键安装和配置
+# 下载并运行安装脚本
+curl -fsSL https://raw.githubusercontent.com/your-repo/subscheck-singbox/main/install.sh | bash
+
+# 或者手动下载
+wget https://raw.githubusercontent.com/your-repo/subscheck-singbox/main/install.sh
 chmod +x install.sh
 ./install.sh
-
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件
-
-# 3. 运行程序
-./run.sh
-
-# 或手动运行
-source .venv/bin/activate
-python main.py
 ```
 
-## ⚙️ 配置文件
+#### CentOS/RHEL 系统
+```bash
+# 下载并运行安装脚本
+curl -fsSL https://raw.githubusercontent.com/your-repo/subscheck-singbox/main/install.sh | bash
 
-### `.env` (环境变量)
-
-用于存放所有敏感信息，例如 API tokens 和密码。
-
-```env
-# Gist Configuration
-GIST_TOKEN="your_github_token"
-GIST_ID="your_gist_id"
-
-# WebDAV Configuration for Result Uploads
-WEBDAV_HOSTNAME="https://your.webdav.host/dav/"
-WEBDAV_USERNAME="your_username"
-WEBDAV_PASSWORD="your_password"
-
-# WebDAV Configuration for Subscription Backup
-WEBDAV_BACKUP_HOSTNAME="https://your.webdav.host/dav/"
-WEBDAV_BACKUP_USERNAME="your_username"
-WEBDAV_BACKUP_PASSWORD="your_password"
+# 或者手动下载
+wget https://raw.githubusercontent.com/your-repo/subscheck-singbox/main/install.sh
+chmod +x install.sh
+./install.sh
 ```
 
-### `config.yaml` (主要配置)
+#### Windows 系统
+```powershell
+# 使用 PowerShell 运行安装脚本
+irm https://raw.githubusercontent.com/your-repo/subscheck-singbox/main/install_windows.bat | iex
 
-在此文件中配置程序的行为，例如测速参数、上传目标等。所有敏感信息都应使用 `${VAR_NAME}` 的形式从 `.env` 文件中引用。
+# 或者手动下载后运行
+# 下载 install_windows.bat 并双击运行
+```
+
+### 方法二：手动安装
+
+#### 1. 环境要求
+- Python 3.8+
+- Go 1.21+
+- Git
+
+#### 2. 克隆项目
+```bash
+git clone https://github.com/your-repo/subscheck-singbox.git
+cd subscheck-singbox
+```
+
+#### 3. 安装依赖
+```bash
+# 安装 uv Python 包管理器
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 安装 Python 依赖
+uv sync
+
+# 编译 Go 程序
+go mod download
+go build -o build/subscheck main.go
+```
+
+#### 4. 配置设置
+```bash
+# 创建配置文件
+cp config.example.yaml config.yaml
+
+# 创建环境变量文件 (可选)
+cp env.example .env
+
+# 编辑配置文件，添加您的订阅链接
+nano config.yaml
+```
+
+### 🎯 运行测速
+
+```bash
+# 基本测速
+uv run main.py
+
+# 仅编译Go核心
+uv run main.py --compile-only
+
+# 调试模式
+DEBUG=1 uv run main.py
+
+# 指定配置文件
+uv run main.py -c custom_config.yaml
+
+# 指定订阅文件
+uv run main.py -s subscription.txt
+
+# 查看帮助
+uv run main.py --help
+```
+
+## 🔄 工作流程
+
+```
+1. Python解析订阅 → 2. 创建临时HTTP服务器 → 3. Go程序获取节点 → 4. Go高性能测速 → 5. Python展示结果
+```
+
+## 📊 输出示例
+
+```
+================================================================================
+🎯 SubsCheck-Singbox v3.0 Python+Go混合测速结果
+================================================================================
+📊 节点统计:
+   └─ Python解析节点: 5,252
+   └─ 实际测试节点: 100
+
+⚡ Go核心测速统计:
+   └─ Go接收节点: 100
+   └─ 去重后节点: 99
+   └─ 可用节点: 15
+   └─ 消耗流量: 0.156 GB
+
+✅ 成功节点详情 (15个):
+--------------------------------------------------------------------------------
+ 1. 🚀 [vmess] 美国-洛杉矶
+    📍 104.21.45.78:443
+    ⏱️  延迟: 234ms | 🚀 速度: 45.67 Mbps
+
+ 2. ⚡ [vless] 日本-东京
+    📍 172.67.182.45:8080
+    ⏱️  延迟: 156ms | 🚀 速度: 78.23 Mbps
+
+📈 测试结果:
+   └─ 成功率: 15.2% (15/99)
+   └─ 平均速度: 52.45 Mbps
+   └─ 平均延迟: 198ms
+
+🔧 版本信息:
+   └─ Python桥接: v3.0 (智能订阅解析)
+   └─ Go核心: v3.0 (原生协议测速)
+================================================================================
+```
+
+## 🌐 部署方案
+
+### Windows 本地测试
+```bash
+uv run main.py
+```
+
+### Ubuntu VPS 定时测速
+```bash
+# 克隆项目
+git clone https://github.com/your-repo/subscheck-singbox
+cd subscheck-singbox
+
+# 运行安装脚本
+./install.sh
+
+# 设置定时任务
+crontab -e
+# 添加: 0 */6 * * * cd /path/to/subscheck-singbox && uv run main.py
+```
+
+### Docker 部署
+```dockerfile
+FROM golang:1.21-alpine AS builder
+
+WORKDIR /app
+COPY . .
+RUN go mod download
+RUN go build -o build/subscheck main.go
+
+FROM python:3.11-alpine
+RUN pip install uv
+COPY --from=builder /app/build /app/build
+COPY --from=builder /app/requirements.txt /app/
+COPY --from=builder /app/main.py /app/
+COPY --from=builder /app/parsers /app/parsers
+COPY --from=builder /app/testers /app/testers
+COPY --from=builder /app/utils /app/utils
+COPY --from=builder /app/core /app/core
+
+RUN uv sync
+
+CMD ["uv", "run", "main.py"]
+```
+
+## 🔧 配置说明
+
+### config.yaml 主要配置项
 
 ```yaml
-# 结果上传设置
-upload_settings:
-  enabled: false
-  type: "webdav"  # 可选: local, gist, webhook, webdav, r2
-  
-  webdav:
-    enabled: true
-    hostname: "${WEBDAV_HOSTNAME}"
-    username: "${WEBDAV_USERNAME}"
-    password: "${WEBDAV_PASSWORD}"
-    remote_path: "subscheck_results.json"
+# 基础设置
+concurrent: 10              # 并发线程数 (建议: 5-20)
+timeout: 5000               # 超时时间(毫秒) (建议: 3000-10000)
+check-interval: 60          # 定时检查间隔(分钟)
 
-# 订阅备份设置
-subscription_backup:
-  enabled: false
-  
-  gist:
-    enabled: false
-    token: "${GIST_TOKEN}"
-    gist_id: "${GIST_ID}"
-    filename: "subscheck_backup.txt"
+# 测速配置
+speed-test-url: "https://github.com/AaronFeng753/Waifu2x-Extension-GUI/releases/download/v2.21.12/Waifu2x-Extension-GUI-v2.21.12-Portable.7z"
+download-timeout: 10        # 下载测试时间(秒)
+download-mb: 20            # 单节点测速下载数据大小(MB)
+total-speed-limit: 0       # 总下载速度限制(MB/s)
+min-speed: 512             # 最低测速结果舍弃(KB/s)
+
+# 节点处理
+rename-node: true          # 是否重命名节点
+node-prefix: ""            # 节点名称前缀
+filter-regex: ""           # 节点名称过滤正则表达式
+node-type: []              # 只测试指定协议的节点
+
+# 流媒体检测
+media-check: false         # 是否开启流媒体检测
+platforms:                 # 检测平台列表
+  - iprisk
+  - youtube
+  - netflix
+  - openai
+
+# 结果保存
+save-method: "local"       # 保存方式 (local/gist/webdav/s3/r2)
+output-dir: ""             # 输出目录
+
+# 订阅链接
+sub-urls:
+  - "https://raw.githubusercontent.com/example/sub1.txt"
+  - "https://raw.githubusercontent.com/example/sub2.yaml"
 ```
 
-### `subscription.txt` (订阅源)
+### .env 环境变量配置
 
-在此文件中添加您的订阅链接，一行一个。
+创建 `.env` 文件来保存敏感信息：
 
-```
-https://example.com/subscription1
-https://example.com/subscription2
-```
+```bash
+# 复制模板文件
+cp env.example .env
 
-## 📦 项目结构
-
-```
-subscheck-ubuntu/
-├── core/
-│   └── singbox_runner.py       # sing-box 核心接口
-├── parsers/
-│   └── ...                     # 协议解析器
-├── testers/
-│   └── node_tester.py          # 节点测试逻辑
-├── utils/
-│   ├── config_utils.py         # 环境变量解析
-│   ├── uploader.py             # 结果上传模块
-│   └── subscription_backup.py  # 订阅备份模块
-├── .env                        # 环境变量 (私密)
-├── .env.example                # 环境变量示例
-├── config.yaml                 # 核心配置
-├── main.py                     # 主程序入口
-├── requirements.txt            # 依赖列表
-└── install.sh                  # VPS 自动安装脚本
+# 编辑配置
+nano .env
 ```
 
+#### GitHub Gist 配置 (推荐)
+1. 创建 GitHub Personal Access Token：
+   - 访问：https://github.com/settings/tokens
+   - 点击 "Generate new token (classic)"
+   - 勾选 `gist` 权限
+   - 复制生成的 token
+
+2. 创建空白 Gist：
+   - 访问：https://gist.github.com/
+   - 创建一个新的 Gist
+   - 复制 URL 中的 Gist ID
+
+3. 配置 `.env`：
+```bash
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+GITHUB_GIST_ID=your_gist_id_here
+```
+
+#### WebDAV 配置
+```bash
+WEBDAV_URL=https://your-webdav-server.com/dav/
+WEBDAV_USERNAME=your_username
+WEBDAV_PASSWORD=your_password
+```
+
+#### S3/MinIO 配置
+```bash
+S3_ENDPOINT=https://s3.amazonaws.com
+S3_ACCESS_ID=your_access_key_id
+S3_SECRET_KEY=your_secret_access_key
+S3_BUCKET=your_bucket_name
+```
+
+#### 通知配置
+```bash
+# Telegram 通知
+TELEGRAM_BOT_TOKEN=1234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789
+TELEGRAM_CHAT_ID=123456789
+
+# Bark 通知 (iOS)
+BARK_URL=https://api.day.app/YOUR_BARK_KEY
+
+# Server酱通知 (微信)
+SERVERCHAN_URL=https://sctapi.ftqq.com/YOUR_SCT_KEY.send
+```
+
+## 📝 高级用法
+
+### 流媒体检测
+开启流媒体检测可以获取更多节点信息，但会增加测试时间：
+
+```yaml
+# config.yaml
+media-check: true
+platforms:
+  - iprisk
+  - youtube
+  - netflix
+  - openai
+  - disney
+  - gemini
+  - tiktok
+```
+
+### 节点过滤
+使用正则表达式过滤特定节点：
+
+```yaml
+# config.yaml
+filter-regex: ".*香港.*"  # 只测试名称包含"香港"的节点
+node-type: ["vmess", "vless"]  # 只测试vmess和vless协议的节点
+```
+
+### 定时任务
+设置定时任务自动执行测试：
+
+```bash
+# Linux (crontab)
+crontab -e
+# 添加以下行，每6小时执行一次
+0 */6 * * * cd /path/to/subscheck-singbox && uv run main.py
+
+# Windows (任务计划程序)
+# 创建基本任务，设置触发器为"每天"，重复间隔为"6小时"
+# 操作为"启动程序"，程序为"uv.exe"，参数为"run main.py"
+```
+
+### 自定义通知
+配置多种通知方式，及时获取测试结果：
+
+```yaml
+# config.yaml
+save-method: "gist"  # 保存到GitHub Gist
+
+# .env
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+```
+
+## 🐛 故障排除
+
+### 常见问题
+
+1. **Go编译失败**
+   ```bash
+   # 检查Go版本
+   go version
+   
+   # 重新下载依赖
+   go mod download
+   
+   # 重新编译
+   go build -o build/subscheck main.go
+   ```
+
+2. **Python依赖安装失败**
+   ```bash
+   # 检查Python版本
+   python --version
+   
+   # 重新安装依赖
+   uv sync
+   ```
+
+3. **订阅链接无法获取**
+   ```bash
+   # 检查网络连接
+   ping github.com
+   
+   # 使用代理
+   export HTTP_PROXY=http://127.0.0.1:7890
+   export HTTPS_PROXY=http://127.0.0.1:7890
+   uv run main.py
+   ```
+
+4. **测试结果不准确**
+   ```bash
+   # 增加测试时间
+   download-timeout: 20
+   download-mb: 50
+   
+   # 降低并发数
+   concurrent: 5
+   ```
+
+### 调试模式
+启用调试模式获取详细日志：
+
+```bash
+DEBUG=1 uv run main.py
+```
+
+## 📝 更新日志
+
+### v3.0.0 (2025-09-15)
+- 🎉 全新Python+Go混合架构
+- ✅ 智能订阅解析 (Python)
+- ⚡ 原生协议测速 (Go)
+- 🎨 美化用户界面
+- 🧹 项目结构优化
+- 📱 增加Windows安装脚本
+- 🌐 支持多种结果保存方式
+- 🔔 增加通知功能
+
+## 🤝 贡献指南
+
+欢迎提交Issue和Pull Request来改进此项目！
+
+1. Fork 本仓库
+2. 创建您的特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交您的更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 打开一个Pull Request
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+
+## 🙏 致谢
+
+- [sing-box](https://github.com/SagerNet/sing-box) - 代理核心
+- [mihomo](https://github.com/MetaCubeX/mihomo) - 代理核心
+- [uv](https://github.com/astral-sh/uv) - Python包管理器
+
+---
+
+**SubsCheck-Singbox v3.0 - 让代理测速更智能、更高效！** 🚀
