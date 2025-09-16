@@ -4,7 +4,7 @@
 
 [![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![Go](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://golang.org/)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#)
+
 
 ## ✨ 特色功能
 
@@ -453,38 +453,8 @@ TELEGRAM_CHAT_ID=your_chat_id
 DEBUG=1 uv run main.py
 ```
 
-## 📝 更新日志
 
-### v3.0.0 (2025-09-15)
-- 🎉 全新Python+Go混合架构
-- ✅ 智能订阅解析 (Python)
-- ⚡ 原生协议测速 (Go)
-- 🎨 美化用户界面
-- 🧹 项目结构优化
-- 📱 增加Windows安装脚本
-- 🌐 支持多种结果保存方式
-- 🔔 增加通知功能
 
-## 🤝 贡献指南
 
-欢迎提交Issue和Pull Request来改进此项目！
 
-1. Fork 本仓库
-2. 创建您的特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交您的更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 打开一个Pull Request
 
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 🙏 致谢
-
-- [sing-box](https://github.com/SagerNet/sing-box) - 代理核心
-- [mihomo](https://github.com/MetaCubeX/mihomo) - 代理核心
-- [uv](https://github.com/astral-sh/uv) - Python包管理器
-
----
-
-**SubsCheck-Singbox v3.0 - 让代理测速更智能、更高效！** 🚀
