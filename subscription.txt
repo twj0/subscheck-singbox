@@ -1,7 +1,38 @@
-# SubsCheck-Singbox v3.0 測試訂閱文件
-# 在這裡添加您的代理節點訂閱鏈接
-# 每行一個訂閱鏈接
+# ================================
+# 备用高质量聚合订阅源 (使用直接链接+CDN备用)
+# ================================
 
-# 示例訂閱鏈接（請替換為實際的訂閱鏈接）
+# 直接 GitHub 链接 (优先)
+https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt
+https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray
 https://raw.githubusercontent.com/mahdibland/SSAggregator/master/sub/sub_merge.txt
-https://api-jx.02000.xin/jx?token=f38030fb2d99c02fcea41f244a9427c5
+https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2
+
+# CDN 备用链接
+https://fastly.jsdelivr.net/gh/chengaopan/AutoMergePublicNodes@master/list.txt
+https://cdn.jsdelivr.net/gh/chengaopan/AutoMergePublicNodes@master/list.txt
+https://cdn.staticaly.com/gh/chengaopan/AutoMergePublicNodes/master/list.txt
+
+# 更多稳定源
+https://fastly.jsdelivr.net/gh/anaer/Sub@master/sub.list
+https://cdn.jsdelivr.net/gh/anaer/Sub@master/sub.list
+
+# ================================
+# Clash YAML 配置源 (直接链接)
+# ================================
+
+https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list.meta.yml
+https://raw.githubusercontent.com/ripaojiedian/freenode/main/clash
+https://raw.githubusercontent.com/vxiaov/free_proxies/main/clash/clash.provider.yaml
+https://raw.githubusercontent.com/chengaopan/AutoMergePublicNodes/master/list.yml
+https://raw.githubusercontent.com/anaer/Sub/main/clash.yaml
+https://raw.githubusercontent.com/mfuu/v2ray/master/clash.yaml
+
+# CDN Clash 备用
+https://cdn.jsdelivr.net/gh/itxve/fetch-clash-node/node/merge.yaml
+https://fastly.jsdelivr.net/gh/Flikify/getNode@main/clash.yaml
+
+# 代理链接 (作为备用，如果上面的直接链接失败)
+https://gh-proxy.com/https://raw.githubusercontent.com/mfuu/v2ray/master/v2ray
+https://gh-proxy.com/https://raw.githubusercontent.com/peasoft/NoMoreWalls/master/list_raw.txt
+https://gh-proxy.com/https://raw.githubusercontent.com/ripaojiedian/freenode/main/clash

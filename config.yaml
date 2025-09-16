@@ -73,7 +73,7 @@ platforms:
 # =============================================================================
 
 # 保存方式 (local, gist, webdav, s3, r2)
-save-method: "local"       # local:本地文件, gist:GitHub Gist, webdav:WebDAV服务器, s3:S3/MinIO, r2:Cloudflare R2
+save-method: "gist"       # local:本地文件, gist:GitHub Gist, webdav:WebDAV服务器, s3:S3/MinIO, r2:Cloudflare R2
 
 # 输出目录 (当save-method为local时生效)
 output-dir: ""             # 留空则保存到当前目录的results文件夹
